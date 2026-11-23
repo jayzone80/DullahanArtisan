@@ -53,6 +53,10 @@ fn cmd_pal(args: &[String]) -> Result<(), String> {
     let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
+            "-h" | "--help" => {
+                print_usage();
+                return Ok(());
+            }
             "-o" | "--out" => {
                 i += 1;
                 out_prefix = Some(args.get(i).ok_or("-o requires output prefix")?.clone());
@@ -126,6 +130,10 @@ fn cmd_mesh(args: &[String]) -> Result<(), String> {
     let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
+            "-h" | "--help" => {
+                print_usage();
+                return Ok(());
+            }
             "-p" | "--pal" | "--palette" => {
                 i += 1;
                 pal_override = Some(PathBuf::from(args.get(i).ok_or("-p requires palette path")?));
@@ -288,6 +296,10 @@ fn cmd_sfx(args: &[String]) -> Result<(), String> {
     let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
+            "-h" | "--help" => {
+                print_usage();
+                return Ok(());
+            }
             "-k" | "--kit" => {
                 i += 1;
                 kit_override = Some(PathBuf::from(args.get(i).ok_or("-k requires kit path")?));
@@ -403,6 +415,10 @@ fn cmd_validate(args: &[String]) -> Result<(), String> {
     let mut expect_loop = false;
     for a in args {
         match a.as_str() {
+            "-h" | "--help" => {
+                print_usage();
+                return Ok(());
+            }
             "--loop" => expect_loop = true,
             s if !s.starts_with('-') && path.is_none() => path = Some(PathBuf::from(s)),
             other => return Err(format!("unknown validate arg '{other}'")),
@@ -454,7 +470,8 @@ USAGE:
   artisan pal <file.pal> [-o <prefix>] [--sheet <png>]
   artisan mesh <file.mdl> [-p <pal>] [-o <out.glb|.gltf>] [--ext-pal <prefix>]
                [--render <png>] [--turn <png>] [--focus <id>]
-               [--size WxH] [--yaw D] [--pitch D] [--fill F] [--ortho] [--wire] [--hud 0|1]
+               [--size WxH] [--yaw D] [--pitch D] [--fov D] [--fill F]
+               [--bg #hex] [--ortho] [--wire] [--hud 0|1]
   artisan sfx <file.sfx> [-k <kit>] [-o <out.wav>] [--var N]
               [--plot <png>] [--size WxH] [--seed S]
   artisan validate <file.glb|.gltf|.wav> [--loop]
@@ -464,6 +481,10 @@ USAGE:
 
 fn cmd_spec(args: &[String]) -> Result<(), String> {
     let topic = args.first().map(|s| s.as_str()).unwrap_or("all");
+    if matches!(topic, "-h" | "--help") {
+        print_usage();
+        return Ok(());
+    }
     if topic == "all" || topic == "pal" {
         println!(
             r#"=== PAL (.pal) ===

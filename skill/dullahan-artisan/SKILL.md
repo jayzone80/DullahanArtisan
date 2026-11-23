@@ -21,9 +21,9 @@ Run `artisan spec [pal|mesh|sfx]` at any time to print the authoritative grammar
 
 | Task | Command |
 | :--- | :--- |
-| Build 3 PBR atlases (+ swatch sheet) | `artisan pal <file.pal> -o <prefix> [--sheet <png>]` |
+| Build 3 PBR atlases (+ swatch sheet) | `artisan pal <file.pal> [-o <prefix>] [--sheet <png>]` |
 | Build 3D model + validate + render | `artisan mesh <file.mdl> [-p <pal>] [-o <out.glb\|.gltf>] [--ext-pal <prefix>] [--render <hero.png>] [--turn <turn.png>] [--focus <id>]` |
-| Build audio + validate + plot | `artisan sfx <file.sfx> [-k <kit>] [-o <out.wav>] [--var N] [--plot <diag.png>]` |
+| Build audio + validate + plot | `artisan sfx <file.sfx> [-k <kit>] [-o <out.wav>] [--var N] [--plot <diag.png>] [--size WxH] [--seed S]` |
 | Standalone validation | `artisan validate <file.glb\|.gltf\|.wav> [--loop]` |
 | Print full grammar | `artisan spec [pal\|mesh\|sfx]` |
 
