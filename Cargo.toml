@@ -1,0 +1,22 @@
+[package]
+name = "dullahan-artisan"
+version = "0.1.0"
+edition = "2021"
+description = "Dullahan Artisan — headless, LLM-native low-poly 3D PBR and procedural SFX/music asset compiler"
+
+[lib]
+name = "dullahan_artisan"
+path = "src/lib.rs"
+
+[[bin]]
+name = "artisan"
+path = "src/main.rs"
+
+[dependencies]
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true
+panic = "abort"

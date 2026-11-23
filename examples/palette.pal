@@ -1,0 +1,68 @@
+grid 8x8@16 bg=#d4dde8
+# Row 0: Foliage & Nature ramps
+grass_dark    #3a5f2c   .90  0     -
+grass_mid     #58863c   .88  0     -
+grass_light   #7ea952   .86  0     -
+pine_dark     #23422b   .90  0     -
+pine_mid      #35613e   .88  0     -
+pine_light    #4e8054   .86  0     -
+moss_mid      #627d3b   .90  0     -
+sand_warm     #d2bd92   .92  0     -
+
+# Row 1: Earth, Stone & Masonry ramps
+dirt_dark     #4b3828   .92  0     -
+dirt_mid      #6e543d   .90  0     -
+stone_dark    #474c54   .90  0     -
+stone_mid     #6f7782   .88  0     -
+stone_light   #9aa2ad   .85  0     -
+plaster_warm  #e6dfd1   .88  0     -
+plaster_shade #c8bfae   .90  0     -
+slate_blue    #3b4b5c   .84  0     -
+
+# Row 2: Wood ramps
+wood_dark     #442b1c   .86  0     -
+wood_oak      #744d30   .84  0     -
+wood_light    #a67549   .82  0     -
+wood_plank    #c79a6b   .84  0     -
+bark_dark     #3d2c22   .92  0     -
+canvas_cream  #dfd7c4   .92  0     -
+leather_dark  #52392b   .72  0     -
+seat_tan      #8a6d52   .85  0     -
+
+# Row 3: Vehicle, Architecture & Creature paints
+olive_dark    #3d5a34   .72  .05   -
+olive_body    #557a44   .64  .08   -
+olive_light   #6e9658   .60  .08   -
+roof_cream    #e3dfd0   .74  0     -
+red_dark      #8c2320   .68  .05   -
+red_paint     #c8362e   .58  .08   -
+terracotta    #b55038   .84  0     -
+terracotta_dk #843625   .86  0     -
+
+# Row 4: Fox / Organic tones & Copper patina
+fox_dark      #a4471b   .86  0     -
+fox_orange    #d46528   .84  0     -
+fox_light     #ea8b44   .84  0     -
+fox_cream     #f2e9da   .86  0     -
+fox_charcoal  #262428   .86  0     -
+copper_patina #45897a   .45  .65   -
+copper_dark   #2e6358   .52  .60   -
+water_deep    #2c648278 .12  .05   -
+
+# Row 5: Metals, Rubber & Glass
+rubber_dark   #1e2126   .88  .04   -
+bumper_dark   #2a2e35   .68  .25   -
+iron_dark     #353a42   .44  .88   -
+steel_mid     #8b949e   .32  .95   -
+alloy_light   #cfd6de   .24  .96   -
+brass_gold    #cfa44c   .28  .94   -
+glass_tint    #76bcd870 .08  .06   -
+glass_clear   #b8e4f558 .06  .05   -
+
+# Row 6: Emissives & Signals
+headlight     #fff1a8   .25  0     #ffe278
+amber_glow    #ffbf40   .30  0     #ff9918
+tail_red      #e02828   .30  0     #ff2222
+beacon_gold   #fff4b8   .20  0     #ffcc44
+window_warm   #ffd880   .30  0     #ffaa38
+eye_amber     #f5c542   .22  0     #e89c1e

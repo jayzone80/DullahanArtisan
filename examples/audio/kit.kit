@@ -1,0 +1,66 @@
+# Shared Showcase Synth & Sound Design Voice Kit
+
+# Warm punchy kick
+def kick_punch
+  osc sin 150 dur=.24 penv=150>44:.055 env=.002,.18,0,.04 g=.95
+  osc tri 92  dur=.11 penv=92>46:.045  env=.001,.08,0,.02 g=.35 | flt lp 320
+  noi white dur=.016 env=.001,.014,0,.002 g=.20 | flt bp 2400 q=1.1
+end
+
+# Crisp snare with resonant body + airy snap
+def snare_crisp
+  osc tri 210 dur=.11 penv=210>135:.035 env=.001,.07,0,.02 g=.55
+  noi pink dur=.18 env=.001,.13,0,.04 g=.78 | flt bp 2200 q=.9 | flt hp 420
+  noi white dur=.09 env=.001,.06,0,.02 g=.38 | flt hp 4800
+end
+
+# Crisp closed hi-hat
+def hat_closed
+  noi white dur=.055 env=.001,.042,0,.012 g=.65 | flt hp 7200 q=.8
+end
+
+# Driving filtered analog bass voice
+def bass_drive
+  osc saw C2 env=.003,.11,.55,.04 cenv=2400>380:.11 g=.85 | flt lp 520 q=1.5 | drv 1.4 asym=.08
+  osc sqr C2 env=.003,.08,.35,.04 g=.32 | flt lp 260
+end
+
+# Wide warm stereo supersaw pad
+def pad_lush
+  ssaw C3 w=saw v=7 det=14 spr=.90 env=.14,.35,.78,.28 g=.70 | flt lp 1650 q=.75
+end
+
+# Sparkling FM arpeggio pluck
+def arp_sparkle
+  fm C4 mr=2.0 mi=2.4 md=.075 env=.002,.11,.15,.06 g=.75 | flt lp 4200 q=.8
+end
+
+# Expressive singing lead with gentle vibrato
+def lead_sing
+  ssaw C4 w=saw v=3 det=7 spr=.45 env=.012,.14,.76,.14 lfo=p:5.4:.18 g=.85 | flt lp 2600 q=1.1 | drv 1.25
+end
+
+# Natural pure-syrinx songbird voices (gentle soft FM + whistling multi-note pitch arcs)
+def bird_trill
+  fm 3400 dur=.16 mr=2.0 mi=.28 md=.04 penv=2850>4350:.045>3250:.055>4550:.045 env=.012,.03,.72,.045 lfo=p:32:.42 g=.85 | flt lp 6500
+  fm 3600 t=.19 dur=.15 mr=2.0 mi=.22 md=.04 penv=3200>4650:.045>3400:.08 env=.010,.03,.68,.05 lfo=p:28:.30 g=.72 | flt lp 6500
+end
+
+def bird_call
+  fm 2700 dur=.28 mr=1.0 mi=.18 md=.06 penv=2500>3650:.06>3400:.08>2650:.12 env=.018,.05,.72,.08 lfo=p:20:.22 g=.82 | flt lp 6200
+end
+
+def bird_chirp
+  fm 3900 dur=.095 mr=2.0 mi=.20 md=.03 penv=3300>5100:.035>3750:.05 env=.006,.025,.55,.035 g=.78 | flt lp 7200
+  fm 4100 t=.12 dur=.085 mr=2.0 mi=.16 md=.03 penv=3600>5350:.03>3900:.045 env=.006,.02,.50,.035 g=.65 | flt lp 7200
+end
+
+# Gravel / stone pebble grain for footsteps & impacts
+def pebble_grain
+  noi white dur=.019 env=.001,.015,0,.003 | flt bp 3400 q=2.4
+end
+
+# Scattered impact debris grain
+def debris_grain
+  noi pink dur=.028 env=.001,.022,0,.004 | flt bp 2800 q=2.2
+end

@@ -1,0 +1,16 @@
+# Living Stereo Outdoor Woodland Ambience (8s seamless equal-power loop)
+sfx woodland_ambience dur=8.0 sr=44100 ch=2 loop=1 xfade=.75 curve=eqp norm=-1 seed=23
+use kit.kit
+
+# 3-tier stereo breathing wind bed (audio-rate modulated bandpass filters!)
+noi brown g=.42 lfo=g:.125:.25:sin:0 cl=1 | flt lp 210 q=.7
+noi pink  g=.44 pan=-.58 lfo=g:.25:.46:sin:0,cf:.25:220:sin:.10 cl=1 | flt bp 520 q=1.4
+noi pink  g=.44 pan=.58  lfo=g:.25:.46:sin:.50,cf:.25:260:sin:.60 cl=1 | flt bp 680 q=1.4
+noi pink  g=.18 lfo=g:.375:.35:sin:.25,pan:.125:.65:sin:0 cl=1 | flt bp 3200 q=1.8
+
+# Wide stereo scattered FM songbirds echoing through outdoor canopy reverb
+sct bird_trill n=5 win=.4..7.2 gap=1.05 pr=-3..4 gr=.45..0.95 pan=-.85..0.85 seed=41 g=.42 | rev .86 .45 pre=18
+sct bird_call  n=4 win=.8..6.8 gap=1.25 pr=-2..3 gr=.40..0.85 pan=-.80..0.80 seed=73 g=.38 | rev .88 .48 pre=24
+sct bird_chirp n=6 win=.2..7.5 gap=.85  pr=-4..5 gr=.30..0.75 pan=-.90..0.90 seed=97 g=.32 | rev .84 .42
+
+bus | flt hp 32

@@ -1,0 +1,15 @@
+# Tactile Gravel Footstep Foley (compile with --var 4 for non-repetitive gameplay steps)
+sfx footstep_gravel dur=.34 sr=44100 ch=2 norm=-1 seed=17
+use kit.kit
+
+# 1. Grounded boot heel impact weight (moderate gain so it feels like a step, not a kick drum)
+osc sin 104 dur=.065 penv=104>38:.048 env=.002,.042,0,.016 g=.44
+
+# 2. Heel gravel crush + slightly delayed toe-roll scrape
+noi pink dur=.13 cenv=2500>820:.095 env=.004,.085,0,.032 g=.72 | flt bp 1650 q=1.1
+noi pink t=.072 dur=.12 cenv=3100>1150:.085 env=.006,.075,0,.032 g=.46 pan=.12 | flt bp 2100 q=1.3
+
+# 3. Scattered loose gravel pebble micro-grains across the heel-to-toe roll
+sct pebble_grain n=14 win=.008..0.24 gap=.010 pr=-6..6 gr=.30..1.0 pan=-.45..0.45 seed=43 g=.58
+
+bus | flt hp 38

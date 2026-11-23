@@ -1,0 +1,9 @@
+# Cinematic Heavy Impact Foley (test with --var 4)
+sfx boss_impact_sfx dur=.85 sr=44100 ch=2 norm=-1 seed=31
+use kit.kit
+
+osc sin 145 dur=.34 penv=145>28:.12 env=.002,.24,0,.08 g=.92 | drv 1.4
+mod 260 dur=.55 p=1:1:.45,2.31:.55:.32,3.87:.35:.22,5.64:.18:.15 env=.001,.28,0,.22 g=.42 | drv 1.8 | flt bp 950 q=1.0
+noi pink dur=.38 cenv=3400>420:.28 env=.002,.22,0,.14 g=.72 | flt lp 2200 q=1.2
+sct debris_grain n=16 win=.01..0.44 gap=.014 pr=-6..6 gr=.30..1 pan=-.75..0.75 seed=59 g=.52
+bus | flt hp 28 | rev .72 .26 pre=12 | cmp -10 3 .005 .10 2

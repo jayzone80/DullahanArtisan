@@ -1,0 +1,22 @@
+# Studio-Grade 4-Bar Multi-Track Melodic Game Loop (116 BPM, seamless pre-warm loop)
+sfx arcade_anthem_loop bpm=116 bars=4 bpb=4 sr=44100 ch=2 loop=1 xfade=.02 curve=lin norm=-1 seed=42
+use kit.kit
+
+# Tight drum groove
+pat kick_punch  "X...X...X...X..." step=.25 rep=4 g=.95
+pat snare_crisp "....X.......X..." step=.25 rep=4 g=.68 | rev .48 .22
+pat hat_closed  "x.g.X.g.x.g.X.x." step=.25 swing=.06 rep=4 g=.34 pan=.20
+
+# Driving octave bassline (F major / D minor progression: Dm - Bb - F - C)
+seq bass_drive "D2:.5 D3:.5 D2:.5 D2:.5 D2:.5 D3:.5 D2:.5 C2:.5 Bb1:.5 Bb2:.5 Bb1:.5 Bb1:.5 Bb1:.5 Bb2:.5 Bb1:.5 A1:.5 F1:.5 F2:.5 F1:.5 F1:.5 F1:.5 F2:.5 F1:.5 G1:.5 C2:.5 C3:.5 C2:.5 C2:.5 C2:.5 C3:.5 A1:.5 C2:.5" gate=.78 g=.76
+
+# Wide lush stereo chord pad
+seq pad_lush "[D3,F3,A3]:4 [Bb2,D3,F3]:4 [F3,A3,C4]:4 [C3,E3,G3]:4" gate=.98 g=.42 | cho .55 3.5 .40 | rev .76 .34
+
+# Sparkling 16th-note FM arpeggio with tempo-synced ping-pong delay
+seq arp_sparkle "D4:.5 F4:.5 A4:.5 D5:.5 A4:.5 F4:.5 A4:.5 F4:.5 Bb3:.5 D4:.5 F4:.5 Bb4:.5 F4:.5 D4:.5 F4:.5 D4:.5 C4:.5 F4:.5 A4:.5 C5:.5 A4:.5 F4:.5 A4:.5 F4:.5 C4:.5 E4:.5 G4:.5 C5:.5 G4:.5 E4:.5 G4:.5 E4:.5" gate=.65 g=.28 pan=-.28 | dly b=.75 mix=.32 fb=.36 damp=4800 pp=1
+
+# Soaring expressive lead melody
+seq lead_sing "A4:1.5 G4:.5 F4:1 E4:1 D4:1.5 F4:.5 Bb4:1.5 A4:.5 C5:1.5 A4:.5 F4:1 G4:1 E4:1.5 G4:.5 C5:1 A4:1" gate=.92 g=.46 pan=.10 | dly b=.5 mix=.26 fb=.30 damp=3800 pp=1 | rev .72 .26
+
+bus | flt hp 30 | cmp -10 3.2 .008 .10 2.5

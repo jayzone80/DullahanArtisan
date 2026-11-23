@@ -1,0 +1,7 @@
+/target/
+/out/
+*.glb
+*.gltf
+*.wav
+*.png
+!docs/showcase/*.png

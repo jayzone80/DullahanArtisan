@@ -1,0 +1,123 @@
+pal ../palette.pal
+# Modular Dungeon Kit (6 snap-ready 2.0m x 2.4m tiles arranged in a 2x3 showcase layout)
+# Each piece is defined as a standalone `def` + `@id` for easy individual export or `--focus <id>`.
+
+# 1. Floor Tile (2.0 x 2.0m recessed flagstone slab with varied stone tones & bevels)
+def tile_floor
+  box stone_dark  0,0,0        2.00,.14,2.00 a=b bev=.015
+  # 3x3 staggered beveled flagstones protruding cleanly above the mortar bed
+  box stone_mid   -.64,.12,-.64 .62,.08,.62  a=b bev=.015
+  box stone_light  .00,.12,-.64 .62,.08,.62  a=b bev=.015
+  box stone_mid    .64,.12,-.64 .62,.08,.62  a=b bev=.015
+  box stone_light -.64,.12,.00  .62,.08,.62  a=b bev=.015
+  box stone_mid    .00,.12,.00  .62,.08,.62  a=b bev=.015
+  box stone_dark   .64,.12,.00  .62,.08,.62  a=b bev=.015
+  box stone_mid   -.64,.12,.64  .62,.08,.62  a=b bev=.015
+  box stone_dark   .00,.12,.64  .62,.08,.62  a=b bev=.015
+  box stone_light  .64,.12,.64  .62,.08,.62  a=b bev=.015
+end
+
+# 2. Solid Wall (2.0m wide x 2.4m tall, heavy plinth, proud ashlar courses, timber beam & cornice)
+def tile_wall
+  box stone_dark  0,0,0        2.00,.34,.36  a=b bev=.02
+  box stone_mid   0,.34,0      2.00,1.82,.28 a=b bev=.012
+  box stone_dark  0,2.16,0     2.00,.24,.36  a=b bev=.02
+  # Proud staggered stone blocks (front & back mirrored Z)
+  box stone_light -.56,.54,.14  .76,.32,.07  bev=.012 m=z
+  box stone_dark   .42,.54,.14  .96,.32,.07  bev=.012 m=z
+  box stone_mid   -.12,.92,.14  .88,.30,.07  bev=.012 m=z
+  box stone_light  .72,.92,.14  .48,.30,.07  bev=.012 m=z
+  box stone_dark  -.74,.92,.14  .44,.30,.07  bev=.012 m=z
+  box stone_light -.46,1.32,.14 .90,.32,.07  bev=.012 m=z
+  box stone_mid    .52,1.32,.14 .82,.32,.07  bev=.012 m=z
+  box stone_dark   .00,1.72,.14 1.04,.30,.07 bev=.012 m=z
+  # Timber header beam & vertical timber bracing
+  box wood_dark    0,2.04,.16   1.98,.10,.08 bev=.01 m=z
+  box iron_dark   -.78,2.04,.20 .07,.12,.03  rep=3:.78,0,0 m=z
+end
+
+# 3. Wall with Doorway (2.0m x 2.4m arched stone surround + iron-banded oak door)
+def tile_wall_door
+  # Left & right wall piers + upper lintel spandrel
+  box stone_dark  -.78,0,0     .44,.34,.36   a=b bev=.02 m=x
+  box stone_mid   -.78,.34,0   .44,1.82,.28  a=b bev=.012 m=x
+  box stone_mid    0,1.72,0    1.16,.44,.28  a=b bev=.012
+  box stone_dark   0,2.16,0    2.00,.24,.36  a=b bev=.02
+  # Proud stone doorway jambs & beveled arch keystone
+  box stone_light -.56,.34,0   .16,1.42,.36  a=b bev=.015 m=x
+  box stone_light  0,1.74,0    1.34,.20,.38  bev=.018
+  pri stone_dark   0,1.84,0    .42  -.13:-.14,.13:-.14,.18:.15,-.18:.15 bev=.012
+  # Heavy timber door frame + planked oak door + iron strap hinges & ring handle
+  box wood_dark   -.46,.04,0   .08,1.62,.32  a=b bev=.008 m=x
+  box wood_dark    0,1.62,0    1.00,.08,.32  bev=.008
+  box wood_oak     0,.04,0     .86,1.58,.10  a=b bev=.012
+  box wood_dark   -.22,.06,.05 .03,1.54,.02  a=b rep=3:.22,0,0 m=z
+  box iron_dark   -.20,.42,.06 .46,.08,.03   bev=.006 m=z
+  box iron_dark   -.20,1.32,.06 .46,.08,.03  bev=.006 m=z
+  # Vertical hanging iron ring pull seated through a steel wall stud & backing plate
+  box iron_dark    .28,.93,.06 .11,.14,.025  bev=.005 m=z
+  cyl steel_mid    .28,.94,.08 .028,.028,.045 r=90,0,0 seg=8 m=z
+  tor iron_dark    .28,.87,.09 .062,.014     r=90,0,0 seg=12 tseg=6 m=z
+end
+
+# 4. Wall with Grated Window (2.0m x 2.4m deeply recessed embrasure + forged iron prison grate)
+def tile_wall_grate
+  box stone_dark   0,0,0       2.00,.34,.36  a=b bev=.02
+  box stone_mid    0,.34,0     2.00,.68,.28  a=b bev=.012
+  box stone_mid   -.76,1.02,0  .48,.82,.28   a=b bev=.012 m=x
+  box stone_mid    0,1.84,0    2.00,.32,.28  a=b bev=.012
+  box stone_dark   0,2.16,0    2.00,.24,.36  a=b bev=.02
+  # Stone window sill, jamb blocks & lintel
+  box stone_light  0,1.00,0    1.18,.12,.40  bev=.015
+  box stone_light  0,1.84,0    1.22,.14,.40  bev=.015
+  box stone_light -.54,1.42,0  .14,.74,.36   bev=.012 m=x
+  # Forged iron window grate (5 vertical bars + 2 horizontal crossbars + bolts)
+  cyl iron_dark   -.36,1.42,0  .024,.024,.76 seg=8 rep=5:.18,0,0
+  box iron_dark    0,1.28,0    .98,.045,.045 bev=.006 rep=2:0,.28,0
+  # Subtle proud lower stone accents
+  box stone_dark  -.48,.66,.14 .84,.28,.06   bev=.01 m=z
+  box stone_light  .50,.66,.14 .78,.28,.06   bev=.01 m=z
+end
+
+# 5. Coffered Ceiling Tile (2.0 x 2.0m stone slab + heavy cross timber beams + iron corner plates + chain ring)
+# Displayed flipped beams-up on a low inspection plinth so its underside architecture reads clearly!
+def tile_ceiling
+  box stone_dark   0,0,0       2.00,.14,2.00 a=b bev=.015
+  # Recessed stone coffer border & cross beams
+  box wood_dark    0,.14,-.90  2.00,.20,.20  a=b bev=.015 m=z
+  box wood_dark   -.90,.14,0   .20,.20,1.62  a=b bev=.015 m=x
+  box wood_oak     0,.14,0     1.80,.18,.22  a=b bev=.015
+  box wood_oak     0,.14,0     .22,.18,1.80  a=b bev=.015
+  # Iron reinforcement straps & central ceiling chandelier/chain anchor ring
+  box iron_dark   -.84,.24,-.84 .22,.12,.22  bev=.01 m=xz
+  box iron_dark    0,.24,0     .30,.12,.30   bev=.012
+  tor steel_mid    0,.38,0     .11,.022      r=90,0,0 seg=12 tseg=6
+end
+
+# 6. Modular Stone Pillar (2.4m tall octagonal column + stepped plinth + capital + wall torch sconce!)
+def tile_pillar
+  box stone_dark   0,0,0       .78,.22,.78   a=b bev=.022
+  box stone_mid    0,.22,0     .62,.16,.62   a=b bev=.018
+  cyl stone_light  0,.38,0     .26,.24,1.64  seg=8 a=b bev=.015
+  # Forged iron column clamping bands
+  cyl iron_dark    0,.82,0     .27,.27,.08   seg=8 bev=.008 rep=2:0,.76,0
+  # Stepped crown capital
+  box stone_mid    0,2.02,0    .64,.16,.64   a=b bev=.018
+  box stone_dark   0,2.18,0    .80,.22,.80   a=b bev=.022
+  # Mounted iron torch sconce (bracket seated firmly into iron cup holding torch shaft)
+  box iron_dark    0,1.42,.26  .10,.22,.05   bev=.008
+  tub iron_dark    0,0,0  .022  0:1.40:.26,0:1.40:.46,0:1.58:.46 seg=6
+  cyl iron_dark    0,1.54,.46  .046,.056,.10 a=b seg=8 bev=.006
+  cyl wood_dark    0,1.52,.46  .032,.046,.34 a=b seg=8
+  tor iron_dark    0,1.84,.46  .056,.014     seg=8 tseg=5
+  pyr amber_glow   0,1.98,.46  .13,.24,.13   sides=5
+  pyr beacon_gold  0,1.96,.46  .08,.18,.08   sides=5 o=.01,.01
+end
+
+# Clean 2x3 Asset-Pack Showcase Arrangement (all pieces grounded on Y=0, neatly spaced)
+use @wall        tile_wall        -2.50,0,-1.55
+use @wall_door   tile_wall_door    0.00,0,-1.55
+use @wall_grate  tile_wall_grate   2.50,0,-1.55
+use @floor       tile_floor       -2.50,0,1.35
+use @ceiling     tile_ceiling      0.00,0,1.35
+use @pillar      tile_pillar       2.50,0,1.35

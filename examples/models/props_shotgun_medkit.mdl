@@ -1,0 +1,77 @@
+pal ../palette.pal
+# Game Props Showcase: Tactical Pump-Action Shotgun + 12-Gauge Shells + First-Aid Medkit
+# Each prop is wrapped in its own `def` + `@id` for standalone export or `--focus <id>`.
+
+# Reusable 12-gauge shotgun shell (brass rim + red plastic hull)
+def shell_12g
+  cyl brass_gold 0,0,0    .014,.014,.022 seg=10 a=b bev=.002
+  cyl red_paint  0,.022,0 .013,.013,.054 seg=10 a=b bev=.002
+end
+
+# 1. Pump-Action Shotgun (oriented along +X barrel, standing neatly on a low display rack)
+def prop_shotgun
+  # Sculpted walnut buttstock + rubber recoil pad (flush wrist seated directly into receiver)
+  pri wood_oak    0,0,0   .052  -.48:-.115,-.45:.012,-.18:.042,-.06:.054,-.06:-.022,-.15:-.085,-.34:-.125 bev=.010
+  pri rubber_dark 0,0,0   .054  -.505:-.117,-.478:-.117,-.448:.014,-.475:.014 bev=.006
+
+  # Machined dark steel receiver + recessed ejection port + visible brass/red shell + top rail
+  box iron_dark   .06,.02,0     .30,.095,.056 bev=.012
+  box bumper_dark .08,.032,.026 .10,.032,.010
+  cyl red_paint   .07,.032,.024 .011,.011,.055 r=0,0,90 seg=8
+  cyl brass_gold  .04,.032,.024 .0115,.0115,.016 r=0,0,90 seg=8
+  box steel_mid  -.04,.072,0    .022,.012,.034 rep=7:.032,0,0
+
+  # Trigger guard loop + curved trigger
+  tub iron_dark   0,0,0  .008  -.04:-.025:0,-.02:-.075:0,.06:-.075:0,.09:-.025:0 seg=6
+  box steel_mid   .01,-.045,0   .010,.036,.008 r=0,0,-22
+
+  # Long blued-steel barrel + underbarrel magazine tube + barrel clamp + front sight bead
+  cyl iron_dark   .48,.044,0    .018,.017,.62 r=0,0,90 seg=12 sm=1
+  cyl steel_mid   .79,.044,0    .013,.013,.02 r=0,0,90 seg=10
+  cyl iron_dark   .42,.004,0    .016,.016,.50 r=0,0,90 seg=12 sm=1
+  cyl steel_mid   .67,.004,0    .017,.017,.024 r=0,0,90 seg=10 bev=.004
+  box iron_dark   .61,.024,0    .028,.066,.042 bev=.005
+  box iron_dark   .76,.066,0    .022,.018,.012 bev=.003
+  ico tail_red    .76,.078,0    .008 sub=1
+
+  # Ribbed hardwood pump forend + action bars
+  cyl wood_dark   .38,.004,0    .027,.027,.24 r=0,0,90 seg=12 bev=.008 sm=1
+  cyl wood_oak    .29,.004,0    .029,.029,.014 r=0,0,90 seg=12 rep=7:.030,0,0
+  box steel_mid   .24,.004,.022 .16,.008,.006 m=z
+end
+
+# 2. First-Aid Medkit Pickup (chamfered hard-shell case, bold raised red cross, steel latches & handle)
+def prop_medkit
+  # Rounded chamfered white/cream case halves + dark waterproof gasket seam
+  box roof_cream   0,.00,0    .42,.34,.14 a=b bev=.030
+  box bumper_dark  0,.17,0    .426,.346,.018 bev=.004
+  # Recessed emblem plate + bold raised medical cross (front & back!)
+  box plaster_shade 0,.17,.070 .22,.20,.012 bev=.006 m=z
+  box red_paint     0,.17,.078 .15,.046,.016 bev=.005 m=z
+  box red_paint     0,.17,.078 .046,.15,.016 bev=.005 m=z
+  # Brushed steel corner guards (4 corners, front & back)
+  box steel_mid    .18,.03,.060 .075,.075,.034 bev=.008 m=xz
+  box steel_mid    .18,.31,.060 .075,.075,.034 bev=.008 m=xz
+  # Top snap latches + sculpted tubular carry handle with dark rubber grip
+  box steel_mid    .11,.345,0  .046,.032,.075 bev=.006 m=x
+  box iron_dark    .11,.338,.044 .036,.046,.016 bev=.004 m=x
+  tub steel_mid    0,0,0  .012  -.08:.34:0,-.08:.41:0,.08:.41:0,.08:.34:0 seg=8
+  cyl bumper_dark  0,.41,0    .017,.017,.10 r=0,0,90 seg=8 bev=.004
+end
+
+# Showcase Presentation: Shotgun neatly seated on low stand + shells + Medkit cleanly separated beside it
+grp @shotgun -.26,.22,.02 r=0,-10,12
+  use prop_shotgun 0,0,0
+end
+# Minimal dark gun-rest cradles seating stock & forend cleanly at Y=0
+box @stand_a bumper_dark -.54,0,.07  .05,.16,.11 a=b bev=.008
+box @stand_b bumper_dark  .04,0,-.03 .05,.27,.11 a=b bev=.008
+box @stand_c bumper_dark -.25,0,.02  .66,.024,.13 a=b r=0,-10,0 bev=.006
+
+# 3 loose 12-gauge shells scattered cleanly in front
+use @shells  shell_12g -.40,0,.26
+use @shell2  shell_12g -.33,.014,.30 r=90,34,0
+use @shell3  shell_12g -.24,.014,.24 r=90,-18,0
+
+# First-Aid Medkit angled neatly beside the shotgun with clean silhouette separation
+use @medkit  prop_medkit .58,0,.18 r=0,-26,0
