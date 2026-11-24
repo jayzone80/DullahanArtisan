@@ -16,11 +16,19 @@ pub struct Triangle {
     pub is_translucent: bool,
 }
 
+#[derive(Debug, Clone)]
+pub struct ColliderMesh {
+    pub name: String,
+    pub tris: Vec<Triangle>,
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct Mesh {
     pub tris: Vec<Triangle>,
     /// Optional bounding boxes keyed by `@id` tags for `--focus @id` close-up renders.
     pub part_bounds: HashMap<String, Aabb>,
+    /// Optional separate collider sub-meshes exported as named child glTF nodes (e.g. `hull-convcolonly`, `UBX_crate_01`).
+    pub colliders: Vec<ColliderMesh>,
 }
 
 impl Mesh {

@@ -14,6 +14,7 @@ pub struct RenderOptions {
     pub fill: f32,
     pub ortho: bool,
     pub wireframe: bool,
+    pub show_colliders: bool,
     pub hud: bool,
     pub bg: [u8; 4],
     pub focus_bounds: Option<Aabb>,
@@ -31,6 +32,7 @@ impl Default for RenderOptions {
             fill: 0.88,
             ortho: false,
             wireframe: false,
+            show_colliders: false,
             hud: false,
             bg: [212, 221, 232, 255],
             focus_bounds: None,
@@ -681,6 +683,26 @@ pub fn render_view_canvas(mesh: &Mesh, palette: &Palette, opts: &RenderOptions) 
                     canvas.draw_line(a.0 as i32, a.1 as i32, b.0 as i32, b.1 as i32, wf);
                     canvas.draw_line(b.0 as i32, b.1 as i32, c.0 as i32, c.1 as i32, wf);
                     canvas.draw_line(c.0 as i32, c.1 as i32, a.0 as i32, a.1 as i32, wf);
+                }
+            }
+        }
+    }
+
+    // Optional collider wireframe overlay (bright green)
+    if (opts.show_colliders || opts.wireframe) && !mesh.colliders.is_empty() {
+        let col_wf = [72, 245, 118, 195];
+        let wf_w = w as f32;
+        let wf_h = h as f32;
+        for col in &mesh.colliders {
+            for tri in &col.tris {
+                if let (Some(a), Some(b), Some(c)) = (
+                    cam.project(tri.a, wf_w, wf_h),
+                    cam.project(tri.b, wf_w, wf_h),
+                    cam.project(tri.c, wf_w, wf_h),
+                ) {
+                    canvas.draw_line(a.0 as i32, a.1 as i32, b.0 as i32, b.1 as i32, col_wf);
+                    canvas.draw_line(b.0 as i32, b.1 as i32, c.0 as i32, c.1 as i32, col_wf);
+                    canvas.draw_line(c.0 as i32, c.1 as i32, a.0 as i32, a.1 as i32, col_wf);
                 }
             }
         }

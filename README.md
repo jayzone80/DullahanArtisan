@@ -1,20 +1,25 @@
 # Dullahan Artisan (`artisan`)
 
-> **A headless, single-binary (~800 KB) Rust compiler built specifically for LLMs to author game-ready low-poly 3D PBR assets, shared color-palette atlases, and procedural SFX/music — no Blender, no DAW, no bloated MCP.**
+> **A headless, single-binary (~1.2 MB) game-asset compiler written in zero-dependency Rust — built specifically for LLMs to author low-poly 3D PBR assets, shared color-palette atlases, procedural SFX/music, and crisp 2D Game UI SVGs without Blender, a DAW, Inkscape, or bloated MCP servers.**
 
-Dullahan Artisan replaces fragile GUI/MCP round-trips and verbose JSON with a **token-dense, line-oriented plaintext DSL** (`.pal`, `.mdl`, `.sfx`, `.kit`), compiling directly to validated **`.glb`/`.gltf`** models (1 opaque draw call + optional translucent pass), **3-map PBR atlases** (`BaseColor`, `ORM`, `Emissive`), and **16-bit PCM `.wav`** audio — complete with a built-in multi-threaded PBR software orbit renderer and 5-panel spectrogram diagnostic plotter so any coding agent can visually inspect and iterate in a tight closed loop.
+Dullahan Artisan replaces fragile GUI and MCP round-trips with a **token-dense, line-oriented plaintext DSL** (`.pal`, `.mdl`, `.sfx`, `.kit`) plus a **zero-dependency Game-UI SVG validator & rasterizer** (`.svg`), compiling directly to validated **`.glb`/`.gltf`** models (1 opaque draw call + optional translucent pass & engine collider nodes), **3-map PBR atlases** (`BaseColor`, `ORM`, `Emissive`), **16-bit PCM `.wav`** audio, and **GPU alpha-bled `.png`** UI sprites — complete with a built-in multi-threaded PBR software orbit renderer, 5-panel spectrogram diagnostic plotter, and checkerboard/grid/9-slice SVG visual QA previewer so any coding agent can visually inspect and iterate in a tight closed loop.
 
 ---
 
 ## Showcase (100% Generated from Plaintext DSL — Zero Blender / Zero DAW)
 
 ### 3D Game Assets (`.mdl` → `.glb` / `.gltf`)
-All three packs below share a single **2.9 KB** 3-map PBR palette atlas ([`examples/palette.pal`](examples/palette.pal)) and pass strict glTF 2.0 binary & outward-normal validation:
+All four packs below share a single **2.9 KB** 3-map PBR palette atlas ([`examples/palette.pal`](examples/palette.pal)) and pass strict glTF 2.0 binary & outward-normal validation:
 
-| Off-Road 4×4 Vehicle (2 draws, translucent interior) | Modular Dungeon Kit (6 snap tiles, 1 draw call) | Weapon & Pickup Props (1 draw call) |
-| :---: | :---: | :---: |
-| ![Off-Road 4x4](docs/showcase/offroad_4x4.png) | ![Modular Dungeon Kit](docs/showcase/modular_dungeon_kit.png) | ![Shotgun and Medkit Props](docs/showcase/props_shotgun_medkit.png) |
-| [`offroad_4x4.mdl`](examples/models/offroad_4x4.mdl) | [`modular_dungeon_kit.mdl`](examples/models/modular_dungeon_kit.mdl) | [`props_shotgun_medkit.mdl`](examples/models/props_shotgun_medkit.mdl) |
+| Off-Road 4×4 Vehicle (2 draws, translucent interior) | Red Fox on Carved Stones (1 draw, SDF metaballs + BSP CSG) |
+| :---: | :---: |
+| ![Off-Road 4x4](docs/showcase/offroad_4x4.png) | ![Red Fox on Carved Stones](docs/showcase/fox_on_stones.png) |
+| [`offroad_4x4.mdl`](examples/models/offroad_4x4.mdl) | [`fox_on_stones.mdl`](examples/models/fox_on_stones.mdl) |
+
+| Modular Dungeon Kit (6 snap tiles, 1 draw call) | Weapon & Pickup Props (1 draw call) |
+| :---: | :---: |
+| ![Modular Dungeon Kit](docs/showcase/modular_dungeon_kit.png) | ![Shotgun and Medkit Props](docs/showcase/props_shotgun_medkit.png) |
+| [`modular_dungeon_kit.mdl`](examples/models/modular_dungeon_kit.mdl) | [`props_shotgun_medkit.mdl`](examples/models/props_shotgun_medkit.mdl) |
 
 ### Procedural Audio, Seamless Loops & Music (`.sfx` / `.kit` → `.wav`)
 Pure-DSP synthesis (PolyBLEP oscillators, stereo supersaws, FM, modal partials, Karplus-Strong plucks, 4 noise colors, Cytomic TPT SVF filters, Freeverb, tempo-synced ping-pong delay, 2-cycle pre-warm seamless looping, `--var N` variations) with visual spectrogram & loop-seam verification:
@@ -26,16 +31,25 @@ Pure-DSP synthesis (PolyBLEP oscillators, stereo supersaws, FM, modal partials, 
 
 Also included: [`footstep_gravel.sfx`](examples/audio/footstep_gravel.sfx) (`--var 4` foley variations) and [`boss_impact_sfx.sfx`](examples/audio/boss_impact_sfx.sfx) (layered modal/sub impact) using shared voice library [`kit.kit`](examples/audio/kit.kit).
 
+### 2D Game UI & Vector Icons (`.svg` → `.png` + Visual QA)
+Zero-dependency SVG validator & 4-subscanline anti-aliased rasterizer (shapes, full `<path>` including arcs/Beziers, transforms, linear/radial gradients, `<clipPath>`, `<use>`, `<feGaussianBlur>`/`<feDropShadow>`, GPU transparent alpha-bleed, and `--preview` checkerboard/grid/`--9slice` QA HUD — keeping UI fonts in-engine for clean localization):
+
+| Dark-Fantasy HUD & Dullahan Portrait (Transparent PNG) | Built-in Visual QA Preview (`--preview --grid`) |
+| :---: | :---: |
+| ![Dullahan HUD](docs/showcase/dullahan_hud.png) | ![Dullahan HUD QA Preview](docs/showcase/dullahan_hud_preview.png) |
+| [`dullahan_hud.svg`](examples/ui/dullahan_hud.svg) | [`dullahan_hud.svg`](examples/ui/dullahan_hud.svg) |
+
 ---
 
 ## Why Dullahan Artisan?
 
-- **Headless & Instant**: Single **~800 KB** static binary compiled from zero-dependency Rust (`std` only) — builds and runs natively on **Linux, macOS, and Windows** with millisecond startup.
-- **Built for LLMs**: Line-oriented syntax with short opcodes, `$var` math expressions, semantic material/voice names, `@id` part tags (`--focus <id>` zoom inspection), and `def`/`use`/`m=`/`rep=`/`rad=` composition — ~65–75% fewer tokens than JSON and trivial to diff/patch.
-- **Game-Engine Friendly**: Every opaque 3D model batches matte, metallic, and emissive surfaces into **1 single PBR draw call** using standard glTF 2.0 / Godot 4 / UE5 / Unity `BaseColor` + `ORM` + `Emissive` atlases (embed by default or share externally via `--ext-pal`).
+- **Headless & Instant**: Single **~1.2 MB** static binary compiled from zero-dependency Rust (`std` only) — builds and runs natively on **Linux, macOS, and Windows** with millisecond startup.
+- **Built for LLMs (No MCP Required)**: Compact line-oriented syntax with short opcodes, `$var` math expressions, semantic material/voice names, `@id` part tags (`--focus <id>` zoom inspection), and `def`/`use`/`m=`/`rep=`/`rad=` composition — easy to read, diff, and patch directly via standard shell & file tools.
+- **Game-Engine Friendly**: Every opaque 3D model batches matte, metallic, and emissive surfaces into **1 single PBR draw call** using standard glTF 2.0 / Godot 4 / UE5 / Unity `BaseColor` + `ORM` + `Emissive` atlases (embed by default or share externally via `--ext-pal`), supports separate named collider child nodes (`col <name> ... end` for Godot `-colonly`/`-convcolonly` and Unreal `UBX_`/`UCX_`), and applies transparent edge alpha-bleed on SVG UI exports for crisp GPU bilinear filtering.
 - **Closed-Loop QA Built In**:
   - **3D**: Multi-threaded 2×2 SSAA PBR software renderer with backface culling, PCF shadows, 2×2 turnarounds with grid/axis HUD, `--focus <id>` close-ups, and strict GLB/glTF validator (including per-triangle outward normal checks).
   - **Audio**: Quantitative CLI telemetry (`peak`, `RMS`, `DC`, `clip`, `seam Δ`, 6-band balance) + 5-panel Magma spectrogram & ±25 ms loop-seam zoom PNG.
+  - **2D UI / SVG**: Strict XML/path/ref/viewBox-overflow validator + 4-subscanline AA PNG rasterizer with checkerboard/grid/`--9slice` QA previews.
 
 ### A Taste of the DSL
 
@@ -86,6 +100,7 @@ artisan pal examples/palette.pal -o out/palette --sheet out/palette_sheet.png
 
 # Compile .mdl -> validated .glb (or .gltf) + PBR hero, turnaround & focused zoom renders
 artisan mesh examples/models/offroad_4x4.mdl -o out/offroad_4x4.glb --render out/offroad_4x4.png --turn out/offroad_4x4_turn.png --yaw 35 --pitch 20
+artisan mesh examples/models/fox_on_stones.mdl -o out/fox_on_stones.glb --render out/fox_on_stones.png --turn out/fox_on_stones_turn.png --yaw 32 --pitch 18
 artisan mesh examples/models/modular_dungeon_kit.mdl -o out/modular_dungeon_kit.glb --render out/dungeon.png --turn out/dungeon_turn.png --yaw 28 --pitch 26
 artisan mesh examples/models/props_shotgun_medkit.mdl --focus medkit --render out/medkit_zoom.png
 
@@ -94,7 +109,10 @@ artisan sfx examples/audio/footstep_gravel.sfx -o out/footstep_gravel.wav --var 
 artisan sfx examples/audio/woodland_ambience.sfx -o out/woodland_ambience.wav --plot out/woodland_diag.png
 artisan sfx examples/audio/arcade_anthem_loop.sfx -o out/arcade_anthem_loop.wav --plot out/anthem_diag.png
 
-# Print the canonical DSL grammar straight from the binary
+# Validate & rasterize Game-UI SVG -> transparent RGBA PNG + QA checkerboard/grid preview
+artisan svg examples/ui/dullahan_hud.svg -o out/dullahan_hud.png --preview out/dullahan_hud_preview.png --grid
+
+# Print the canonical DSL & SVG grammar straight from the binary
 artisan spec
 ```
 

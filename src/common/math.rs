@@ -72,6 +72,10 @@ impl Vec3 {
     pub const fn new(x: f32, y: f32, z: f32) -> Self {
         Self { x, y, z }
     }
+
+    pub const fn splat(v: f32) -> Self {
+        Self { x: v, y: v, z: v }
+    }
     #[inline]
     pub fn dot(self, o: Self) -> f32 {
         self.x * o.x + self.y * o.y + self.z * o.z

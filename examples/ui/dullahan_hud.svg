@@ -1,0 +1,458 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 360" width="640" height="360">
+  <defs>
+    <!-- Metallic & UI Surface Gradients -->
+    <linearGradient id="goldBevel" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#f3d689"/>
+      <stop offset="45%" stop-color="#c49442"/>
+      <stop offset="100%" stop-color="#6b4b19"/>
+    </linearGradient>
+    <linearGradient id="goldHoriz" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#6b4b19"/>
+      <stop offset="50%" stop-color="#f0cf7e"/>
+      <stop offset="100%" stop-color="#6b4b19"/>
+    </linearGradient>
+    <linearGradient id="ironPlate" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#2f374a"/>
+      <stop offset="50%" stop-color="#1d2230"/>
+      <stop offset="100%" stop-color="#11141e"/>
+    </linearGradient>
+    <linearGradient id="panelBg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#181e2c" stop-opacity="0.97"/>
+      <stop offset="100%" stop-color="#0d1019" stop-opacity="0.98"/>
+    </linearGradient>
+    <linearGradient id="slotBg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#0c0f17"/>
+      <stop offset="100%" stop-color="#1c2334"/>
+    </linearGradient>
+
+    <!-- Vital Bar Fills -->
+    <linearGradient id="hpFill" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#ff6574"/>
+      <stop offset="35%" stop-color="#d8263d"/>
+      <stop offset="100%" stop-color="#7c1020"/>
+    </linearGradient>
+    <linearGradient id="soulFill" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#8bfbff"/>
+      <stop offset="40%" stop-color="#28b8db"/>
+      <stop offset="100%" stop-color="#115b7d"/>
+    </linearGradient>
+    <linearGradient id="stamFill" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#ffe082"/>
+      <stop offset="100%" stop-color="#b87418"/>
+    </linearGradient>
+
+    <!-- Portrait Backdrop & Dullahan Material Gradients -->
+    <radialGradient id="portraitSky" cx="62%" cy="32%" r="68%">
+      <stop offset="0%" stop-color="#354b76"/>
+      <stop offset="55%" stop-color="#1a2138"/>
+      <stop offset="100%" stop-color="#0b0e18"/>
+    </radialGradient>
+    <radialGradient id="moonGlow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#e8f3ff" stop-opacity="0.95"/>
+      <stop offset="55%" stop-color="#9dc3f0" stop-opacity="0.45"/>
+      <stop offset="100%" stop-color="#5a84c4" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="armorSteel" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#8d9eb8"/>
+      <stop offset="40%" stop-color="#47536b"/>
+      <stop offset="100%" stop-color="#1e2433"/>
+    </linearGradient>
+    <linearGradient id="armorDark" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#4e5970"/>
+      <stop offset="100%" stop-color="#171c29"/>
+    </linearGradient>
+    <linearGradient id="cloakCrimson" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#8f2438"/>
+      <stop offset="60%" stop-color="#4e1224"/>
+      <stop offset="100%" stop-color="#220914"/>
+    </linearGradient>
+    <linearGradient id="spectralFlame" x1="0" y1="1" x2="0" y2="0">
+      <stop offset="0%" stop-color="#7c52ff"/>
+      <stop offset="48%" stop-color="#38e5ff"/>
+      <stop offset="100%" stop-color="#e6ffff"/>
+    </linearGradient>
+    <radialGradient id="lanternHead" cx="42%" cy="36%" r="62%">
+      <stop offset="0%" stop-color="#6ef6ff"/>
+      <stop offset="42%" stop-color="#219ec4"/>
+      <stop offset="82%" stop-color="#183f63"/>
+      <stop offset="100%" stop-color="#0e1e36"/>
+    </radialGradient>
+    <radialGradient id="lanternAura" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#5ff8ff" stop-opacity="0.7"/>
+      <stop offset="60%" stop-color="#3a86ff" stop-opacity="0.22"/>
+      <stop offset="100%" stop-color="#3a86ff" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="btnCrimson" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#c73247"/>
+      <stop offset="100%" stop-color="#6f1423"/>
+    </linearGradient>
+    <linearGradient id="bladeSteel" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#edf5ff"/>
+      <stop offset="55%" stop-color="#90a5c2"/>
+      <stop offset="100%" stop-color="#46546b"/>
+    </linearGradient>
+    <linearGradient id="gemCyan" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#b8ffff"/>
+      <stop offset="50%" stop-color="#2ec8e8"/>
+      <stop offset="100%" stop-color="#135c85"/>
+    </linearGradient>
+
+    <!-- Clip & Filters -->
+    <clipPath id="portraitClip">
+      <circle cx="92" cy="96" r="56"/>
+    </clipPath>
+    <filter id="uiShadow">
+      <feDropShadow dx="0" dy="4" stdDeviation="3.5" flood-color="#04060b" flood-opacity="0.65"/>
+    </filter>
+    <filter id="cyanGlow">
+      <feGaussianBlur stdDeviation="3.5" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    <filter id="softBlur">
+      <feGaussianBlur stdDeviation="4"/>
+    </filter>
+
+    <!-- Reusable Ornate 9-Slice Corner Bracket -->
+    <g id="cornerOrnament">
+      <path d="M0 18 L0 4 L4 0 L18 0 L14 4 L5 4 L4 5 L4 14 Z" fill="url(#goldBevel)"/>
+      <circle cx="7" cy="7" r="1.7" fill="#f7e2a0"/>
+    </g>
+    <!-- Reusable Diamond Rivet -->
+    <polygon id="goldDiamond" points="0,-5 5,0 0,5 -5,0" fill="url(#goldBevel)" stroke="#2b1e0a" stroke-width="1"/>
+  </defs>
+
+  <!-- ==================== 1. PLAYER UNIT FRAME (TOP-LEFT) ==================== -->
+  <g filter="url(#uiShadow)">
+    <!-- Backing Wing for Vital Bars -->
+    <path d="M126 42 L408 42 L422 56 L422 114 L408 128 L126 128 Z" fill="url(#ironPlate)" stroke="url(#goldBevel)" stroke-width="2.2"/>
+    <path d="M132 47 L405 47 L416 58 L416 112 L405 123 L132 123 Z" fill="none" stroke="#3f4c66" stroke-width="1" opacity="0.65"/>
+
+    <!-- HP Bar Track & Fill (78%) -->
+    <rect x="164" y="55" width="240" height="22" rx="4" fill="#0b0d14" stroke="#394359" stroke-width="1.4"/>
+    <rect x="166" y="57" width="188" height="18" rx="3" fill="url(#hpFill)"/>
+    <rect x="167" y="58" width="186" height="5" rx="2" fill="#ffffff" opacity="0.24"/>
+    <rect x="351" y="57" width="3" height="18" rx="1" fill="#ffc4cc" opacity="0.85"/>
+    <!-- HP Segment Ticks -->
+    <g stroke="#0b0d14" stroke-width="1.2" opacity="0.55">
+      <line x1="212" y1="56" x2="212" y2="76"/>
+      <line x1="260" y1="56" x2="260" y2="76"/>
+      <line x1="308" y1="56" x2="308" y2="76"/>
+      <line x1="356" y1="56" x2="356" y2="76"/>
+    </g>
+
+    <!-- Spectral Soul / Mana Bar (68%) -->
+    <rect x="164" y="84" width="218" height="17" rx="4" fill="#0b0d14" stroke="#394359" stroke-width="1.3"/>
+    <rect x="166" y="86" width="148" height="13" rx="2.5" fill="url(#soulFill)"/>
+    <rect x="167" y="87" width="146" height="4" rx="1.5" fill="#ffffff" opacity="0.28"/>
+    <rect x="311" y="86" width="3" height="13" rx="1" fill="#d9ffff" opacity="0.9"/>
+
+    <!-- Stamina / Dash Charges (4 Chamfered Segments: 3 Lit, 1 Depleted) -->
+    <g>
+      <polygon points="168,108 208,108 203,118 163,118" fill="url(#stamFill)" stroke="#3b2608" stroke-width="1"/>
+      <polygon points="215,108 255,108 250,118 210,118" fill="url(#stamFill)" stroke="#3b2608" stroke-width="1"/>
+      <polygon points="262,108 302,108 297,118 257,118" fill="url(#stamFill)" stroke="#3b2608" stroke-width="1"/>
+      <polygon points="309,108 349,108 344,118 304,118" fill="#171b26" stroke="#3b455c" stroke-width="1"/>
+    </g>
+
+    <!-- Active Buff Mini-Icons under Vital Bars -->
+    <g transform="translate(168, 136)">
+      <!-- Buff 1: Spectral Flame -->
+      <rect x="0" y="0" width="22" height="22" rx="4" fill="url(#slotBg)" stroke="url(#goldBevel)" stroke-width="1.4"/>
+      <path d="M11 4 C14 8 16 10 15 14 C14.5 16.8 13 18 11 18 C9 18 7.5 16.5 7 14 C6.5 11.5 8.5 9.5 9.5 7.5 C10 9 11 9.5 11 4 Z" fill="url(#spectralFlame)"/>
+      <!-- Buff 2: Iron Ward -->
+      <g transform="translate(28, 0)">
+        <rect x="0" y="0" width="22" height="22" rx="4" fill="url(#slotBg)" stroke="url(#goldBevel)" stroke-width="1.4"/>
+        <path d="M11 4 L17 6.5 L16 12.5 C15.4 15.5 13.4 17.4 11 18.5 C8.6 17.4 6.6 15.5 6 12.5 L5 6.5 Z" fill="url(#armorSteel)" stroke="#d8e3f5" stroke-width="0.8"/>
+      </g>
+      <!-- Buff 3: Blood Fury -->
+      <g transform="translate(56, 0)">
+        <rect x="0" y="0" width="22" height="22" rx="4" fill="url(#slotBg)" stroke="#9e2a3e" stroke-width="1.4"/>
+        <path d="M11 4 L16 12 L11 18 L6 12 Z" fill="url(#hpFill)" stroke="#ff99a8" stroke-width="0.8"/>
+      </g>
+    </g>
+
+    <!-- Portrait Outer Gothic Medallion Frame -->
+    <circle cx="92" cy="96" r="68" fill="url(#ironPlate)" stroke="url(#goldBevel)" stroke-width="3"/>
+    <circle cx="92" cy="96" r="61" fill="none" stroke="#424f6b" stroke-width="1.5"/>
+    <circle cx="92" cy="96" r="57" fill="#090c14" stroke="url(#goldBevel)" stroke-width="2"/>
+
+    <!-- ==================== DULLAHAN PLAYER PORTRAIT ==================== -->
+    <g clip-path="url(#portraitClip)">
+      <!-- Midnight Sky + Pale Moon -->
+      <rect x="34" y="38" width="116" height="116" fill="url(#portraitSky)"/>
+      <circle cx="116" cy="64" r="30" fill="url(#moonGlow)"/>
+      <circle cx="116" cy="64" r="14" fill="#e6f2ff" opacity="0.92"/>
+      <circle cx="121" cy="61" r="12" fill="#2c3e66" opacity="0.22"/>
+
+      <!-- Distant Spectral Mist -->
+      <path d="M32 132 Q66 116 96 128 T154 122 L154 158 L32 158 Z" fill="#245c7a" opacity="0.32"/>
+
+      <!-- Dullahan Flowing Crimson Cloak (Behind Shoulders) -->
+      <path d="M40 156 L48 106 Q62 94 78 96 Q98 96 116 112 L134 156 Z" fill="url(#cloakCrimson)"/>
+      <path d="M42 104 Q52 84 68 88 L74 114 L46 126 Z" fill="#6b1a2e"/>
+
+      <!-- Spectral Wisp Plume Rising from Empty Armored Neck Collar -->
+      <g filter="url(#cyanGlow)">
+        <path d="M74 96 C64 82 65 65 76 50 C78 60 85 57 86 45 C94 60 92 78 82 96 Z" fill="url(#spectralFlame)" opacity="0.92"/>
+        <path d="M77 95 C72 84 74 71 80 61 C84 72 85 83 80 95 Z" fill="#e6ffff" opacity="0.85"/>
+        <!-- Drifting Soul Embers -->
+        <circle cx="67" cy="60" r="2.2" fill="#8dfbff"/>
+        <circle cx="88" cy="54" r="1.8" fill="#c7a6ff"/>
+        <circle cx="72" cy="46" r="1.5" fill="#d9ffff"/>
+      </g>
+
+      <!-- Headless Knight Chestplate, Layered Pauldrons & Empty Flared Gorget -->
+      <!-- Left (Viewer-Left) Broad Spiked Pauldron -->
+      <path d="M36 122 C38 98 54 88 70 92 L68 122 L42 136 Z" fill="url(#armorSteel)" stroke="#131824" stroke-width="1.6"/>
+      <path d="M44 102 C52 94 61 93 68 95" fill="none" stroke="#c7d6ed" stroke-width="1.8" stroke-linecap="round"/>
+      <path d="M38 117 L64 108" fill="none" stroke="url(#goldBevel)" stroke-width="2"/>
+      <!-- Right (Viewer-Right) Pauldron -->
+      <path d="M88 94 C104 92 118 102 122 120 L100 132 L86 112 Z" fill="url(#armorDark)" stroke="#131824" stroke-width="1.6"/>
+      <path d="M90 97 C100 97 109 102 114 110" fill="none" stroke="#8a9db8" stroke-width="1.5" stroke-linecap="round"/>
+
+      <!-- Central Dark-Steel Cuirass -->
+      <path d="M56 106 L78 100 L102 108 L108 156 L50 156 Z" fill="url(#armorSteel)" stroke="#141926" stroke-width="1.6"/>
+      <!-- Center Breastplate Ridge & Gold Trim -->
+      <path d="M78 104 L78 154" fill="none" stroke="#181f2e" stroke-width="2"/>
+      <path d="M79.5 106 L79.5 152" fill="none" stroke="#a6b9d4" stroke-width="1" opacity="0.65"/>
+      <path d="M60 116 L78 124 L96 116" fill="none" stroke="url(#goldBevel)" stroke-width="2.2" stroke-linejoin="round"/>
+      <!-- Cloak Clasp on Chest -->
+      <circle cx="78" cy="113" r="4.2" fill="url(#goldBevel)" stroke="#291c09" stroke-width="1"/>
+      <circle cx="78" cy="113" r="1.8" fill="#d8263d"/>
+
+      <!-- Empty Flared Iron Gorget (Clearly Headless!) -->
+      <path d="M62 96 Q78 106 94 96 L91 84 Q78 92 65 84 Z" fill="url(#armorDark)" stroke="#111520" stroke-width="1.5"/>
+      <ellipse cx="78" cy="87" rx="13" ry="4.5" fill="#090d16" stroke="#8093b0" stroke-width="1.3"/>
+      <ellipse cx="78" cy="87" rx="8" ry="2.6" fill="#46ebff" opacity="0.55"/>
+
+      <!-- Cradled Spectral Dullahan Head (Held Under Arm / In Gauntleted Hand on Lower-Right) -->
+      <g transform="translate(111, 113)">
+        <!-- Ethereal Glow Aura behind Held Head -->
+        <circle cx="0" cy="0" r="28" fill="url(#lanternAura)"/>
+        <!-- Rising Spectral Crown Flames off Held Head -->
+        <g filter="url(#cyanGlow)">
+          <path d="M-10 -14 C-14 -24 -6 -30 -3 -36 C0 -27 6 -28 9 -34 C13 -25 14 -18 9 -12 Z" fill="url(#spectralFlame)" opacity="0.9"/>
+        </g>
+        <!-- Faceted Spectral Skull / Helm Silhouette -->
+        <path d="M-16 -4 C-17 -16 -9 -22 0 -22 C9 -22 17 -16 16 -4 C15 4 12 8 10 13 L6 17 L-6 17 L-10 13 C-12 8 -15 4 -16 -4 Z" fill="url(#lanternHead)" stroke="#0d1829" stroke-width="1.6"/>
+        <!-- Subtle Skull Cheekbone & Brow Ridges -->
+        <path d="M-13 -4 Q-8 4 -5 6 M13 -4 Q8 4 5 6" fill="none" stroke="#78f4ff" stroke-width="1.2" opacity="0.5"/>
+        <!-- Blazing Carved Eyes -->
+        <polygon points="-10,-5 -3,-2 -5,2 -11,0" fill="#e8ffff"/>
+        <polygon points="10,-5 3,-2 5,2 11,0" fill="#e8ffff"/>
+        <!-- Nose Hollow -->
+        <polygon points="0,1 2.2,5 -2.2,5" fill="#091524"/>
+        <!-- Jagged Spectral Grin -->
+        <path d="M-7 9 L-4 11.5 L0 9.5 L4 11.5 L7 9 L5 14 L0 12.5 L-5 14 Z" fill="#d9ffff"/>
+      </g>
+
+      <!-- Gauntleted Steel Forearm & Articulated Fingers Cradling the Head -->
+      <path d="M96 135 C99 127 104 126 108 128 C113 129 120 127 125 122 L139 136 L130 156 L100 156 Z" fill="url(#armorSteel)" stroke="#111622" stroke-width="1.5" stroke-linejoin="round"/>
+      <!-- Curved Armored Fingers Gripping Jaw -->
+      <path d="M97 129 Q99 120 103 122 Q104 126 102 131 Z" fill="url(#armorSteel)" stroke="#111622" stroke-width="1.1"/>
+      <path d="M104 131 Q107 123 111 125 Q111 129 108 133 Z" fill="url(#armorSteel)" stroke="#111622" stroke-width="1.1"/>
+      <path d="M112 131 Q116 123 120 125 Q119 130 116 134 Z" fill="url(#armorSteel)" stroke="#111622" stroke-width="1.1"/>
+      <!-- Angled Gauntlet Wrist Cuff with Gold Trim -->
+      <path d="M102 142 L132 134" fill="none" stroke="url(#goldBevel)" stroke-width="2.2" stroke-linecap="round"/>
+      <path d="M104 146 L133 138" fill="none" stroke="#141926" stroke-width="1.2"/>
+    </g>
+
+    <!-- Portrait Medallion Cardinal Gold Rivets -->
+    <use href="#goldDiamond" x="92" y="28"/>
+    <use href="#goldDiamond" x="92" y="164"/>
+    <use href="#goldDiamond" x="24" y="96"/>
+    <use href="#goldDiamond" x="160" y="96"/>
+
+    <!-- Corner Crest Medallion (Bottom-Left of Portrait — Pure Vector Emblem, No Text) -->
+    <g transform="translate(45, 143)">
+      <polygon points="0,-16 14,-8 14,8 0,16 -14,8 -14,-8" fill="url(#btnCrimson)" stroke="url(#goldBevel)" stroke-width="2.2"/>
+      <path d="M-7 4 L-5 -5 L0 -1 L5 -5 L7 4 Z" fill="#f7de8c" stroke="#422a08" stroke-width="0.8" stroke-linejoin="round"/>
+      <rect x="-6.5" y="5.5" width="13" height="2.4" rx="1" fill="#f7de8c"/>
+    </g>
+  </g>
+
+  <!-- ==================== 1B. COMPACT UI CONTROLS STRIP (MIDDLE-LEFT) ==================== -->
+  <g transform="translate(24, 178)" filter="url(#uiShadow)">
+    <rect x="0" y="0" width="398" height="44" rx="8" fill="url(#panelBg)" stroke="#3e4b66" stroke-width="1.6"/>
+    <rect x="3" y="3" width="392" height="38" rx="6" fill="none" stroke="#242c3d" stroke-width="1"/>
+
+    <!-- Slider Control (e.g., Audio/Gamma Slider with Gold Diamond Thumb) -->
+    <rect x="18" y="18" width="166" height="8" rx="4" fill="#090c13" stroke="#36425c" stroke-width="1.2"/>
+    <rect x="19" y="19" width="114" height="6" rx="3" fill="url(#soulFill)"/>
+    <polygon points="133,10 143,22 133,34 123,22" fill="url(#goldBevel)" stroke="#241806" stroke-width="1.4"/>
+    <circle cx="133" cy="22" r="3" fill="#fff3c4"/>
+
+    <!-- Divider -->
+    <line x1="202" y1="10" x2="202" y2="34" stroke="#36425c" stroke-width="1.2"/>
+
+    <!-- Toggle Switch ON (Cyan Active) -->
+    <g transform="translate(220, 12)">
+      <rect x="0" y="0" width="44" height="20" rx="10" fill="#133d52" stroke="#46d8f0" stroke-width="1.6"/>
+      <circle cx="34" cy="10" r="7.5" fill="url(#goldBevel)" stroke="#1a2433" stroke-width="1.2"/>
+      <circle cx="34" cy="10" r="2.6" fill="#e6ffff"/>
+    </g>
+
+    <!-- Toggle Switch OFF (Muted Steel) -->
+    <g transform="translate(278, 12)">
+      <rect x="0" y="0" width="44" height="20" rx="10" fill="#0d111a" stroke="#475470" stroke-width="1.5"/>
+      <circle cx="10" cy="10" r="7.5" fill="url(#armorSteel)" stroke="#161b26" stroke-width="1.2"/>
+    </g>
+
+    <!-- Radio / Stepper Pips (3 Gothic Radio Nodes) -->
+    <g transform="translate(342, 22)">
+      <circle cx="0" cy="0" r="6" fill="#0c1018" stroke="url(#goldBevel)" stroke-width="1.5"/>
+      <circle cx="0" cy="0" r="2.8" fill="#f3d689"/>
+      <circle cx="18" cy="0" r="6" fill="#0c1018" stroke="#4a5875" stroke-width="1.4"/>
+      <circle cx="36" cy="0" r="6" fill="#0c1018" stroke="#4a5875" stroke-width="1.4"/>
+    </g>
+  </g>
+
+  <!-- ==================== 2. ACTION SKILL BAR (BOTTOM-LEFT) ==================== -->
+  <g transform="translate(24, 240)" filter="url(#uiShadow)">
+    <!-- Chamfered Skill Dock Frame -->
+    <path d="M12 0 L386 0 L398 12 L398 84 L386 96 L12 96 L0 84 L0 12 Z" fill="url(#ironPlate)" stroke="url(#goldBevel)" stroke-width="2.2"/>
+    <path d="M15 5 L383 5 L393 15 L393 81 L383 91 L15 91 L5 81 L5 15 Z" fill="none" stroke="#42506d" stroke-width="1" opacity="0.6"/>
+
+    <!-- Slot 1: Reaper Scythe Cleave -->
+    <g transform="translate(29, 16)">
+      <rect x="0" y="0" width="64" height="64" rx="7" fill="url(#slotBg)" stroke="url(#goldBevel)" stroke-width="2"/>
+      <rect x="3" y="3" width="58" height="24" rx="5" fill="#ffffff" opacity="0.06"/>
+      <!-- Slash Arc -->
+      <path d="M11 45 A28 28 0 0 1 48 13" fill="none" stroke="#e0364f" stroke-width="3.5" stroke-linecap="round" opacity="0.75"/>
+      <!-- Scythe Haft & Crescent Blade -->
+      <line x1="16" y1="53" x2="46" y2="17" stroke="#8a6035" stroke-width="4" stroke-linecap="round"/>
+      <path d="M46 17 C33 11 19 14 10 25 C21 21 31 23 41 28 Z" fill="url(#bladeSteel)" stroke="#1b2230" stroke-width="1.3" stroke-linejoin="round"/>
+      <circle cx="46" cy="17" r="3" fill="url(#goldBevel)"/>
+      <!-- Key Pip -->
+      <circle cx="56" cy="56" r="5" fill="#181f2e" stroke="url(#goldBevel)" stroke-width="1.2"/>
+      <circle cx="56" cy="56" r="2" fill="#f3d689"/>
+    </g>
+
+    <!-- Slot 2: Cursed Soul-Lantern Orb -->
+    <g transform="translate(121, 16)">
+      <rect x="0" y="0" width="64" height="64" rx="7" fill="url(#slotBg)" stroke="#48d8f0" stroke-width="2.2"/>
+      <circle cx="32" cy="34" r="22" fill="url(#lanternAura)"/>
+      <g filter="url(#cyanGlow)">
+        <path d="M32 9 C38 18 45 23 44 35 C43 44 38 51 32 51 C26 51 21 44 20 35 C19 23 26 18 32 9 Z" fill="url(#spectralFlame)"/>
+      </g>
+      <circle cx="32" cy="37" r="10" fill="#103652" stroke="#9cfaff" stroke-width="1.2"/>
+      <polygon points="27,35 30.5,37 29,39 26.5,38" fill="#e8ffff"/>
+      <polygon points="37,35 33.5,37 35,39 37.5,38" fill="#e8ffff"/>
+      <circle cx="56" cy="56" r="5" fill="#181f2e" stroke="#48d8f0" stroke-width="1.2"/>
+      <circle cx="54" cy="56" r="1.4" fill="#8bfbff"/>
+      <circle cx="58" cy="56" r="1.4" fill="#8bfbff"/>
+    </g>
+
+    <!-- Slot 3: Iron Bastion Ward -->
+    <g transform="translate(213, 16)">
+      <rect x="0" y="0" width="64" height="64" rx="7" fill="url(#slotBg)" stroke="url(#goldBevel)" stroke-width="2"/>
+      <rect x="3" y="3" width="58" height="24" rx="5" fill="#ffffff" opacity="0.06"/>
+      <path d="M32 11 L50 18 L48 36 C46.5 45 40 51 32 54 C24 51 17.5 45 16 36 L14 18 Z" fill="url(#armorSteel)" stroke="url(#goldBevel)" stroke-width="2.2" stroke-linejoin="round"/>
+      <path d="M32 18 L32 47 M22 29 L42 29" fill="none" stroke="url(#goldBevel)" stroke-width="3" stroke-linecap="round"/>
+      <circle cx="32" cy="29" r="3.5" fill="#d8263d" stroke="#f3d689" stroke-width="1"/>
+      <circle cx="56" cy="56" r="5" fill="#181f2e" stroke="url(#goldBevel)" stroke-width="1.2"/>
+      <polygon points="56,53 59,58 53,58" fill="#f3d689"/>
+    </g>
+
+    <!-- Slot 4: Phantom Dash (With Cooldown Arc Overlay) -->
+    <g transform="translate(305, 16)">
+      <rect x="0" y="0" width="64" height="64" rx="7" fill="url(#slotBg)" stroke="#5b6885" stroke-width="2"/>
+      <!-- Motion Chevrons -->
+      <g opacity="0.7">
+        <path d="M13 20 L25 32 L13 44" fill="none" stroke="#5b7aa8" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M25 18 L39 32 L25 46" fill="none" stroke="#70c6e8" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M38 16 L53 32 L38 48" fill="none" stroke="#d8fcff" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round"/>
+      </g>
+      <!-- Cooldown Ring & Subtle Dimmed Track -->
+      <circle cx="32" cy="32" r="23" fill="none" stroke="#182233" stroke-width="3.2"/>
+      <path d="M32 9 A23 23 0 1 1 11 42" fill="none" stroke="#7df4ff" stroke-width="3" stroke-linecap="round"/>
+      <circle cx="56" cy="56" r="5" fill="#181f2e" stroke="#6f80a3" stroke-width="1.2"/>
+      <rect x="54" y="54" width="4" height="4" fill="#a2b4d4"/>
+    </g>
+
+    <!-- Side Dock Accent Studs -->
+    <use href="#goldDiamond" x="0" y="48"/>
+    <use href="#goldDiamond" x="398" y="48"/>
+  </g>
+
+  <!-- ==================== 3. ORNATE 9-SLICE UI PANEL & ITEMS (RIGHT) ==================== -->
+  <g transform="translate(442, 26)" filter="url(#uiShadow)">
+    <!-- 9-Slice Panel Frame (176x308) -->
+    <rect x="0" y="0" width="176" height="308" rx="10" fill="url(#panelBg)" stroke="url(#goldBevel)" stroke-width="2.5"/>
+    <rect x="6" y="6" width="164" height="296" rx="6" fill="none" stroke="#394661" stroke-width="1.2"/>
+
+    <!-- 4 Reusable Corner Ornaments via <use> -->
+    <use href="#cornerOrnament" x="4" y="4"/>
+    <use href="#cornerOrnament" transform="translate(172, 4) scale(-1, 1)"/>
+    <use href="#cornerOrnament" transform="translate(4, 304) scale(1, -1)"/>
+    <use href="#cornerOrnament" transform="translate(172, 304) scale(-1, -1)"/>
+
+    <!-- Panel Header Crest & Divider -->
+    <line x1="24" y1="28" x2="152" y2="28" stroke="url(#goldHoriz)" stroke-width="1.8"/>
+    <use href="#goldDiamond" x="88" y="28"/>
+
+    <!-- 2x2 Inventory / Relics Grid -->
+    <!-- Item 1: Crimson Health Vial -->
+    <g transform="translate(22, 48)">
+      <rect x="0" y="0" width="60" height="60" rx="7" fill="url(#slotBg)" stroke="#4c5c7a" stroke-width="1.6"/>
+      <rect x="24" y="10" width="12" height="6" rx="1.5" fill="#9c6a3c" stroke="#38220f" stroke-width="1"/>
+      <rect x="25" y="16" width="10" height="7" fill="#c9def2" opacity="0.6"/>
+      <path d="M25 23 L16 36 C14 42 18 50 30 50 C42 50 46 42 44 36 L35 23 Z" fill="#182233" stroke="#9fc0df" stroke-width="1.6"/>
+      <path d="M19 36 C17 42 20 48 30 48 C40 48 43 42 41 36 Z" fill="url(#hpFill)"/>
+      <path d="M22 33 Q24 38 23 44" fill="none" stroke="#ffffff" stroke-width="1.8" stroke-linecap="round" opacity="0.55"/>
+    </g>
+
+    <!-- Item 2: Soul Crystal Shard -->
+    <g transform="translate(94, 48)">
+      <rect x="0" y="0" width="60" height="60" rx="7" fill="url(#slotBg)" stroke="#3f8ba6" stroke-width="1.6"/>
+      <polygon points="30,9 43,26 37,50 23,50 17,26" fill="url(#gemCyan)" stroke="#0e2a40" stroke-width="1.5" stroke-linejoin="round"/>
+      <polygon points="30,9 36,26 30,48 24,26" fill="#d8ffff" opacity="0.45"/>
+      <line x1="17" y1="26" x2="43" y2="26" stroke="#b5ffff" stroke-width="1" opacity="0.7"/>
+    </g>
+
+    <!-- Item 3: Ornate Gothic Key -->
+    <g transform="translate(22, 120)">
+      <rect x="0" y="0" width="60" height="60" rx="7" fill="url(#slotBg)" stroke="#4c5c7a" stroke-width="1.6"/>
+      <g transform="translate(30, 30) rotate(-38)">
+        <circle cx="-13" cy="0" r="9" fill="none" stroke="url(#goldBevel)" stroke-width="3.6"/>
+        <circle cx="-13" cy="0" r="3" fill="#d8263d"/>
+        <line x1="-4" y1="0" x2="18" y2="0" stroke="url(#goldBevel)" stroke-width="3.4" stroke-linecap="round"/>
+        <path d="M10 0 L10 7 M16 0 L16 8" stroke="url(#goldBevel)" stroke-width="3" stroke-linecap="round"/>
+      </g>
+    </g>
+
+    <!-- Item 4: Signet Ring -->
+    <g transform="translate(94, 120)">
+      <rect x="0" y="0" width="60" height="60" rx="7" fill="url(#slotBg)" stroke="#4c5c7a" stroke-width="1.6"/>
+      <ellipse cx="30" cy="35" rx="14" ry="12" fill="none" stroke="url(#goldBevel)" stroke-width="5"/>
+      <polygon points="30,13 38,21 30,28 22,21" fill="url(#hpFill)" stroke="#f3d689" stroke-width="1.4" stroke-linejoin="round"/>
+      <polygon points="30,15 34,20 30,22 26,20" fill="#ffb8c2" opacity="0.75"/>
+    </g>
+
+    <!-- Mid Divider -->
+    <line x1="22" y1="196" x2="154" y2="196" stroke="#36425c" stroke-width="1.2"/>
+
+    <!-- Mini Gauge / Progress Indicator Inside Panel -->
+    <rect x="22" y="208" width="132" height="10" rx="5" fill="#0a0d14" stroke="#3d4963" stroke-width="1.2"/>
+    <rect x="24" y="210" width="88" height="6" rx="3" fill="url(#goldBevel)"/>
+
+    <!-- Primary & Secondary Interactive Vector Buttons (Icon-Driven, No Text) -->
+    <!-- Primary Confirm Button -->
+    <g transform="translate(22, 232)">
+      <rect x="0" y="0" width="84" height="34" rx="6" fill="url(#btnCrimson)" stroke="url(#goldBevel)" stroke-width="1.8"/>
+      <rect x="2" y="2" width="80" height="11" rx="4" fill="#ffffff" opacity="0.14"/>
+      <path d="M32 17 L39 24 L53 10" fill="none" stroke="#fff0c4" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"/>
+    </g>
+    <!-- Secondary Cancel Button -->
+    <g transform="translate(114, 232)">
+      <rect x="0" y="0" width="40" height="34" rx="6" fill="url(#ironPlate)" stroke="#5c6c8a" stroke-width="1.6"/>
+      <path d="M13 10 L27 24 M27 10 L13 24" fill="none" stroke="#c3d0e6" stroke-width="2.8" stroke-linecap="round"/>
+    </g>
+
+    <!-- Bottom Decorative Accent Line -->
+    <line x1="36" y1="284" x2="140" y2="284" stroke="url(#goldHoriz)" stroke-width="1.4" opacity="0.8"/>
+  </g>
+</svg>

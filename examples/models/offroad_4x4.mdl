@@ -27,9 +27,7 @@ pri @side_l olive_body -$w/2+.07,0,0 .14  -1.66:.48,-1.44:.48,-1.36:.78,-0.72:.7
 
 # Flared dark wheel-arch fenders (front & rear, mirrored X)
 def fender_arch
-  box bumper_dark 0,.80,0      .14,.09,.70 bev=.012
-  box bumper_dark 0,.65,.36    .14,.32,.09 r=18,0,0 bev=.01
-  box bumper_dark 0,.65,-.36   .14,.32,.09 r=-18,0,0 bev=.01
+  pri bumper_dark 0,0,0 .14  -.48:.48,-.39:.48,-.31:.77,.31:.77,.39:.48,.48:.48,.38:.855,-.38:.855 bev=.012 r=0,90,0
 end
 use @fenders_f fender_arch $w/2+.04,0,$ax_f m=x
 use @fenders_b fender_arch $w/2+.04,0,$ax_b m=x

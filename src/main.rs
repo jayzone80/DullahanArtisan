@@ -11,6 +11,8 @@ use dullahan_artisan::sfx::diagnostics::{analyze_wav, render_diagnostic_png};
 use dullahan_artisan::sfx::engine::render_sound;
 use dullahan_artisan::sfx::parser::load_sound_file;
 use dullahan_artisan::sfx::wav::{read_wav, write_pcm16};
+use dullahan_artisan::svg::parser::load_svg_file;
+use dullahan_artisan::svg::raster::{render_svg_png, SvgRenderOptions};
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -22,9 +24,10 @@ fn main() -> ExitCode {
         "pal" | "palette" => cmd_pal(&args[1..]),
         "mesh" | "model" => cmd_mesh(&args[1..]),
         "sfx" | "audio" => cmd_sfx(&args[1..]),
+        "svg" | "ui" => cmd_svg(&args[1..]),
         "validate" | "val" => cmd_validate(&args[1..]),
         "spec" => cmd_spec(&args[1..]),
-        other => Err(format!("unknown subcommand '{other}' (use: pal, mesh, sfx, validate, spec)")),
+        other => Err(format!("unknown subcommand '{other}' (use: pal, mesh, sfx, svg, validate, spec)")),
     };
     match res {
         Ok(()) => ExitCode::SUCCESS,
@@ -188,6 +191,7 @@ fn cmd_mesh(args: &[String]) -> Result<(), String> {
             }
             "--ortho" => opts.ortho = true,
             "--wire" | "--wireframe" => opts.wireframe = true,
+            "--colliders" => opts.show_colliders = true,
             "--hud" => {
                 i += 1;
                 let v = args.get(i).ok_or("--hud requires 0|1")?;
@@ -266,8 +270,13 @@ fn cmd_mesh(args: &[String]) -> Result<(), String> {
 
     let bb = parsed.mesh.compute_bounds();
     let sz = if bb.is_valid() { bb.size() } else { dullahan_artisan::common::math::Vec3::ZERO };
+    let col_info = if parsed.mesh.colliders.is_empty() {
+        String::new()
+    } else {
+        format!(" cols={}", parsed.mesh.colliders.len())
+    };
     println!(
-        "OK mesh {} tris={} verts={} draws={} bbox=[{:.2}x{:.2}x{:.2}] y=[{:.2}..{:.2}] parts={}{}",
+        "OK mesh {} tris={} verts={} draws={} bbox=[{:.2}x{:.2}x{:.2}] y=[{:.2}..{:.2}] parts={}{}{}",
         parsed.name,
         parsed.mesh.tris.len(),
         parsed.mesh.tris.len() * 3,
@@ -278,6 +287,7 @@ fn cmd_mesh(args: &[String]) -> Result<(), String> {
         if bb.is_valid() { bb.min.y } else { 0.0 },
         if bb.is_valid() { bb.max.y } else { 0.0 },
         parsed.part_count,
+        col_info,
         export_info
     );
     Ok(())
@@ -410,6 +420,159 @@ fn cmd_sfx(args: &[String]) -> Result<(), String> {
     Ok(())
 }
 
+fn cmd_svg(args: &[String]) -> Result<(), String> {
+    let mut input: Option<PathBuf> = None;
+    let mut out_png: Option<PathBuf> = None;
+    let mut preview_png: Option<PathBuf> = None;
+    let mut size_override: Option<(u32, u32)> = None;
+    let mut scale: f64 = 1.0;
+    let mut bg: Option<[u8; 4]> = None;
+    let mut bg_checker = false;
+    let mut grid = false;
+    let mut hud_override: Option<bool> = None;
+    let mut bleed = true;
+    let mut nine_slice: Option<[f64; 4]> = None;
+
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
+            "-h" | "--help" => {
+                print_usage();
+                return Ok(());
+            }
+            "-o" | "--out" => {
+                i += 1;
+                out_png = Some(PathBuf::from(args.get(i).ok_or("-o requires png path")?));
+            }
+            "--preview" => {
+                i += 1;
+                preview_png = Some(PathBuf::from(args.get(i).ok_or("--preview requires png path")?));
+            }
+            "--size" => {
+                i += 1;
+                size_override = Some(parse_size(args.get(i).ok_or("--size requires WxH")?)?);
+            }
+            "--scale" => {
+                i += 1;
+                scale = args
+                    .get(i)
+                    .ok_or("--scale requires positive factor")?
+                    .parse::<f64>()
+                    .map_err(|_| "bad --scale")?;
+                if !scale.is_finite() || scale <= 0.0 {
+                    return Err("--scale must be > 0".into());
+                }
+            }
+            "--bg" => {
+                i += 1;
+                let v = args.get(i).ok_or("--bg requires #hex or 'checker'")?;
+                if v.eq_ignore_ascii_case("checker") {
+                    bg_checker = true;
+                    bg = None;
+                } else {
+                    bg = Some(parse_hex_rgba(v)?);
+                    bg_checker = false;
+                }
+            }
+            "--9slice" => {
+                i += 1;
+                let v = args.get(i).ok_or("--9slice requires T,R,B,L or N")?;
+                let parts: Result<Vec<f64>, _> = v.split(',').map(|s| s.trim().parse::<f64>()).collect();
+                let nums = parts.map_err(|_| format!("invalid --9slice '{v}'"))?;
+                nine_slice = match nums.len() {
+                    1 => Some([nums[0], nums[0], nums[0], nums[0]]),
+                    2 => Some([nums[0], nums[1], nums[0], nums[1]]),
+                    4 => Some([nums[0], nums[1], nums[2], nums[3]]),
+                    _ => return Err("--9slice expects N, V,H, or T,R,B,L".into()),
+                };
+            }
+            "--grid" => grid = true,
+            "--hud" => {
+                i += 1;
+                let v = args.get(i).ok_or("--hud requires 0|1")?;
+                hud_override = Some(v != "0" && !v.eq_ignore_ascii_case("false"));
+            }
+            "--bleed" => {
+                i += 1;
+                let v = args.get(i).ok_or("--bleed requires 0|1")?;
+                bleed = v != "0" && !v.eq_ignore_ascii_case("false");
+            }
+            a if !a.starts_with('-') && input.is_none() => input = Some(PathBuf::from(a)),
+            other => return Err(format!("unknown svg arg '{other}'")),
+        }
+        i += 1;
+    }
+
+    let in_path = input.ok_or("svg requires <file.svg>")?;
+    let doc = load_svg_file(&in_path)?;
+    if !doc.is_ok() {
+        return Err(format!("SVG validation failed: {}", doc.errors.join("; ")));
+    }
+
+    let mut opts = SvgRenderOptions::for_doc(&doc);
+    if let Some((w, h)) = size_override {
+        opts.width = w.max(1);
+        opts.height = h.max(1);
+    } else {
+        opts.width = (doc.width * scale).round().max(1.0) as u32;
+        opts.height = (doc.height * scale).round().max(1.0) as u32;
+    }
+    opts.bg = bg;
+    opts.checker = bg_checker;
+    opts.bleed = bleed;
+
+    let mut export_info = String::new();
+    if let Some(ref op) = out_png {
+        ensure_parent(op)?;
+        let mut out_opts = opts.clone();
+        out_opts.hud = hud_override.unwrap_or(false);
+        out_opts.grid = false;
+        out_opts.nine_slice = None;
+        let png = render_svg_png(&doc, &out_opts);
+        std::fs::write(op, &png).map_err(|e| format!("write svg png: {e}"))?;
+        export_info = format!(" png={:.1}KB", png.len() as f64 / 1024.0);
+    }
+
+    if let Some(ref pp) = preview_png {
+        ensure_parent(pp)?;
+        let mut prev_opts = opts.clone();
+        prev_opts.checker = bg.is_none();
+        prev_opts.hud = hud_override.unwrap_or(true);
+        prev_opts.grid = grid;
+        prev_opts.nine_slice = nine_slice;
+        let png = render_svg_png(&doc, &prev_opts);
+        std::fs::write(pp, &png).map_err(|e| format!("write svg preview png: {e}"))?;
+    }
+
+    let (vx, vy, vw, vh) = doc.view_box;
+    let bb = doc.stats.content_bbox;
+    let bbox_str = if bb.is_valid() {
+        format!("[{:.1},{:.1}..{:.1},{:.1}]", bb.min_x, bb.min_y, bb.max_x, bb.max_y)
+    } else {
+        "[empty]".to_string()
+    };
+    println!(
+        "OK svg {} vb=[{:.0},{:.0} {:.0}x{:.0}] out={}x{} shapes={} grads={} clips={} filters={} bbox={}{} valid=PASS",
+        doc.name,
+        vx,
+        vy,
+        vw,
+        vh,
+        opts.width,
+        opts.height,
+        doc.stats.shapes,
+        doc.stats.gradients,
+        doc.stats.clip_paths,
+        doc.stats.filters,
+        bbox_str,
+        export_info
+    );
+    if !doc.warnings.is_empty() {
+        eprintln!("WARN {}", doc.warnings.join("; "));
+    }
+    Ok(())
+}
+
 fn cmd_validate(args: &[String]) -> Result<(), String> {
     let mut path: Option<PathBuf> = None;
     let mut expect_loop = false;
@@ -424,7 +587,7 @@ fn cmd_validate(args: &[String]) -> Result<(), String> {
             other => return Err(format!("unknown validate arg '{other}'")),
         }
     }
-    let p = path.ok_or("validate requires <file.glb|file.gltf|file.wav>")?;
+    let p = path.ok_or("validate requires <file.glb|file.gltf|file.wav|file.svg>")?;
     let ext = p.extension().and_then(|e| e.to_str()).unwrap_or("").to_ascii_lowercase();
     if ext == "wav" {
         let buf = read_wav(&p)?;
@@ -438,6 +601,23 @@ fn cmd_validate(args: &[String]) -> Result<(), String> {
         );
         if !m.warnings.is_empty() {
             eprintln!("WARN {}", m.warnings.join("; "));
+        }
+    } else if ext == "svg" {
+        let doc = load_svg_file(&p)?;
+        if !doc.is_ok() {
+            return Err(format!("SVG invalid: {}", doc.errors.join("; ")));
+        }
+        println!(
+            "OK validate SVG vb={}x{} shapes={} grads={} clips={} filters={}",
+            doc.view_box.2.round() as i32,
+            doc.view_box.3.round() as i32,
+            doc.stats.shapes,
+            doc.stats.gradients,
+            doc.stats.clip_paths,
+            doc.stats.filters
+        );
+        if !doc.warnings.is_empty() {
+            eprintln!("WARN {}", doc.warnings.join("; "));
         }
     } else {
         let rep = validate_gltf_file(&p)?;
@@ -471,11 +651,14 @@ USAGE:
   artisan mesh <file.mdl> [-p <pal>] [-o <out.glb|.gltf>] [--ext-pal <prefix>]
                [--render <png>] [--turn <png>] [--focus <id>]
                [--size WxH] [--yaw D] [--pitch D] [--fov D] [--fill F]
-               [--bg #hex] [--ortho] [--wire] [--hud 0|1]
+               [--bg #hex] [--ortho] [--wire] [--colliders] [--hud 0|1]
   artisan sfx <file.sfx> [-k <kit>] [-o <out.wav>] [--var N]
               [--plot <png>] [--size WxH] [--seed S]
-  artisan validate <file.glb|.gltf|.wav> [--loop]
-  artisan spec [pal|mesh|sfx]"#
+  artisan svg <file.svg> [-o <out.png>] [--preview <qa.png>]
+              [--size WxH] [--scale S] [--bg #hex|checker]
+              [--9slice T,R,B,L] [--grid] [--hud 0|1] [--bleed 0|1]
+  artisan validate <file.glb|.gltf|.wav|.svg> [--loop]
+  artisan spec [pal|mesh|sfx|svg]"#
     );
 }
 
@@ -500,6 +683,12 @@ Note:   #RRGGBBAA with alpha<FF auto-routes triangles into an optional 2nd BLEND
             r#"=== MESH (.mdl) — Right-handed Y-up (+X right, +Y up, +Z front, Y=0 ground), CCW outward ===
 Directives: pal <rel.pal> | $var = <expr> (+ - * / ^ sin cos tan sind cosd atan2 atan2d sqrt abs min max pi)
 Blocks:     def <name> ... end | grp [@id] [mat] [x,y,z] [flags...] ... end
+Colliders:  col <node_name> [x,y,z] [flags...] ... end   (exports separate child glTF node; mat optional inside)
+Booleans:   csg [@id] [mat] [x,y,z] [flags...] ... end   (exact BSP mesh ops: add/sub/int <prim|use|grp>)
+Metaballs:  sdf [@id] [mat] [x,y,z] [res=28] [sm=1] ... end   (Surface-Nets organic sculpting)
+            SDF prims: sph <x,y,z> <r> | ell <x,y,z> <rx,ry,rz> | cap <x0,y0,z0> <x1,y1,z1> <r0[,r1]>
+                       box <x,y,z> <sx,sy,sz> [rnd=r] | cyl <x,y,z> <r,h> [rnd=r] | tor <x,y,z> <R,r>
+            SDF ops:   [add|sub|int|paint] <prim> ... [k=0] [r=rx,ry,rz] [m=x|y|z|xz]
 Instance:   use [@id] <name> [x,y,z] [flags...] [ov=old:new,...]
 Materials:  <swatch_name> | cell:c,r | uv:u,v
 Primitives (1 line each):
@@ -545,6 +734,25 @@ Pipe FX (| ...):
   drv <amt> [asym=0] [mix=1] | crush <bits> [rate=11025] [mix=1]
   cho [rate=.5] [depthMs=3] [mix=.4] [dly=12] | dly <sec|b=beats> [mix=.3] [fb=.35] [damp=4000] [pp=0|1]
   rev [room=.75] [mix=.3] [damp=.4] [pre=0] | cmp [thr=-12] [rat=3] [atk=.01] [rel=.12] [mk=0] | wid <0..2>"#
+        );
+    }
+    if topic == "all" || topic == "svg" {
+        println!(
+            r##"=== SVG (.svg) — Zero-dependency Game-UI SVG validator & PNG rasterizer ===
+Root:      <svg viewBox="x y w h" [width="w"] [height="h"]>
+Shapes:    <rect rx ry> <circle> <ellipse> <line> <polyline> <polygon> <path d="M L H V C S Q T A Z">
+Structure: <g> <defs> <use href="#id" x y> <clipPath id>
+Paint:     fill, stroke, fill-opacity, stroke-opacity, opacity, fill-rule (nonzero|evenodd), style="..."
+           #RGB/#RGBA/#RRGGBB/#RRGGBBAA, rgb(), rgba(), named colors, currentColor, url(#grad)
+Stroke:    stroke-width, stroke-linecap (butt|round|square), stroke-linejoin (miter|round|bevel),
+           stroke-miterlimit, stroke-dasharray, stroke-dashoffset
+Gradients: <linearGradient x1 y1 x2 y2> <radialGradient cx cy r fx fy>
+           gradientUnits (objectBoundingBox|userSpaceOnUse), gradientTransform, spreadMethod, href, <stop>
+Filters:   <filter id> with <feGaussianBlur stdDeviation> (+ <feMerge> SourceGraphic) or <feDropShadow>
+Transform: translate, scale, rotate(deg [cx cy]), skewX, skewY, matrix
+Notes:     Render fonts/text in-engine for localization (<text> emits a warning and is skipped).
+           -o emits transparent RGBA PNG with GPU alpha-bleed (--bleed 1); --preview adds checkerboard,
+           viewBox frame, HUD telemetry, optional --grid and --9slice T,R,B,L guides."##
         );
     }
     Ok(())

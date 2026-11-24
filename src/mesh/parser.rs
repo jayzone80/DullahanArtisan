@@ -3,13 +3,15 @@ use std::path::{Path, PathBuf};
 
 use crate::common::expr::ExprEnv;
 use crate::common::math::{Mat4, Vec2, Vec3};
-use crate::mesh::geom::Mesh;
+use crate::mesh::csg::{apply_csg, CsgOp};
+use crate::mesh::geom::{ColliderMesh, Mesh};
 use crate::mesh::palette::{Palette, ResolvedMat};
 use crate::mesh::primitives::{
     build_box, build_capsule, build_cylinder, build_icosphere, build_lathe, build_loft,
     build_noisy_plane, build_prism, build_pyramid, build_torus, build_tube, build_wedge, FaceMats,
     LoftSection,
 };
+use crate::mesh::sdf::{build_sdf_mesh, SdfOp, SdfPrim, SdfShape};
 
 #[derive(Debug, Clone)]
 pub struct ParsedModel {
@@ -254,6 +256,87 @@ impl<'a> EvalCtx<'a> {
                 continue;
             }
 
+            if op == "col" {
+                let (body, next_i) = collect_block(lines, i + 1, lineno, "col")?;
+                if line.tokens.len() < 2 {
+                    return Err(format!("line {lineno}: 'col' requires a collider node name (e.g. hull-convcolonly or UBX_model_01)"));
+                }
+                let col_name = line.tokens[1].strip_prefix('@').unwrap_or(&line.tokens[1]).to_string();
+                let (_tag, pos, _mat, flags) = self.parse_grp_header(&line.tokens[2..], lineno)?;
+                let mut child_mesh = self.eval_lines(&body, Some("cell:0,0"), overrides, depth + 1)?;
+                apply_deformers(&mut child_mesh, &flags);
+                let anchor_shift = compute_anchor_shift(
+                    &child_mesh,
+                    flags.anchor.as_ref().unwrap_or(&Anchor::Origin),
+                );
+                if anchor_shift.len_sq() > 1e-10 {
+                    child_mesh.translate(anchor_shift);
+                }
+                let mut placed = Mesh::new();
+                emit_instanced(&mut placed, &child_mesh, pos, &flags, None);
+                if !placed.tris.is_empty() {
+                    out.colliders.push(ColliderMesh {
+                        name: col_name,
+                        tris: placed.tris,
+                    });
+                }
+                i = next_i;
+                continue;
+            }
+
+            if op == "csg" {
+                let (body, next_i) = collect_block(lines, i + 1, lineno, "csg")?;
+                let (tag, pos, grp_mat, flags) =
+                    self.parse_grp_header(&line.tokens[1..], lineno)?;
+                let child_mat = grp_mat.as_deref().or(inherited_mat);
+                let mut child_mesh = self.eval_csg_block(&body, child_mat, overrides, depth + 1)?;
+                apply_deformers(&mut child_mesh, &flags);
+                let anchor_shift = compute_anchor_shift(
+                    &child_mesh,
+                    flags.anchor.as_ref().unwrap_or(&Anchor::Origin),
+                );
+                if anchor_shift.len_sq() > 1e-10 {
+                    child_mesh.translate(anchor_shift);
+                }
+                emit_instanced(&mut out, &child_mesh, pos, &flags, tag.as_deref());
+                self.part_count += 1;
+                i = next_i;
+                continue;
+            }
+
+            if op == "sdf" || op == "meta" {
+                let (body, next_i) = collect_block(lines, i + 1, lineno, &op)?;
+                let (tag, pos, grp_mat, flags) =
+                    self.parse_grp_header(&line.tokens[1..], lineno)?;
+                let child_mat = grp_mat.as_deref().or(inherited_mat);
+                let res = flags
+                    .extras
+                    .get("res")
+                    .map(|v| self.env.eval_f32(v))
+                    .transpose()
+                    .map_err(|e| format!("line {lineno}: {e}"))?
+                    .map(|v| v.round().clamp(8.0, 96.0) as usize)
+                    .unwrap_or(28);
+                // Default smooth normals = true for SDF blocks unless explicitly `sm=0`
+                let explicit_flat = line.tokens[1..]
+                    .iter()
+                    .any(|t| matches!(t.to_ascii_lowercase().as_str(), "sm=0" | "sm=false" | "smooth=0"));
+                let smooth = !explicit_flat;
+                let mut child_mesh = self.eval_sdf_block(&body, child_mat, overrides, res, smooth)?;
+                apply_deformers(&mut child_mesh, &flags);
+                let anchor_shift = compute_anchor_shift(
+                    &child_mesh,
+                    flags.anchor.as_ref().unwrap_or(&Anchor::Origin),
+                );
+                if anchor_shift.len_sq() > 1e-10 {
+                    child_mesh.translate(anchor_shift);
+                }
+                emit_instanced(&mut out, &child_mesh, pos, &flags, tag.as_deref());
+                self.part_count += 1;
+                i = next_i;
+                continue;
+            }
+
             if op == "grp" {
                 let (body, next_i) = collect_block(lines, i + 1, lineno, "grp")?;
                 let (tag, pos, grp_mat, flags) =
@@ -297,6 +380,328 @@ impl<'a> EvalCtx<'a> {
             i += 1;
         }
         Ok(out)
+    }
+
+    fn eval_csg_block(
+        &mut self,
+        lines: &[RawLine],
+        inherited_mat: Option<&str>,
+        overrides: &HashMap<String, String>,
+        depth: usize,
+    ) -> Result<Mesh, String> {
+        let mut acc = Mesh::new();
+        let mut i = 0usize;
+        while i < lines.len() {
+            let line = &lines[i];
+            let lineno = line.lineno;
+            let op0 = line.tokens[0].to_ascii_lowercase();
+            if op0.starts_with('$') {
+                parse_var_line(&line.tokens, &mut self.env, lineno)?;
+                i += 1;
+                continue;
+            }
+
+            let (csg_op, rest_start) = match op0.as_str() {
+                "add" | "uni" | "union" => (CsgOp::Union, 1usize),
+                "sub" | "cut" | "diff" => (CsgOp::Subtract, 1usize),
+                "int" | "intersect" => (CsgOp::Intersect, 1usize),
+                _ => (CsgOp::Union, 0usize),
+            };
+            if rest_start >= line.tokens.len() {
+                return Err(format!("line {lineno}: CSG op '{op0}' requires a primitive or block"));
+            }
+
+            // Support both `sub cyl mat ...` and `sub mat cyl ...`
+            let mut sub_tokens = line.tokens[rest_start..].to_vec();
+            let mut item_mat = inherited_mat;
+            let owned_mat: String;
+            if rest_start == 1
+                && sub_tokens.len() >= 2
+                && !is_mesh_op(&sub_tokens[0])
+                && is_mesh_op(&sub_tokens[1])
+            {
+                owned_mat = sub_tokens.remove(0);
+                item_mat = Some(owned_mat.as_str());
+            }
+
+            let head_op = sub_tokens[0].to_ascii_lowercase();
+            let operand = if head_op == "grp" {
+                let (body, next_i) = collect_block(lines, i + 1, lineno, "grp")?;
+                let (_tag, pos, grp_mat, flags) =
+                    self.parse_grp_header(&sub_tokens[1..], lineno)?;
+                let cm = grp_mat.as_deref().or(item_mat);
+                let mut m = self.eval_lines(&body, cm, overrides, depth + 1)?;
+                apply_deformers(&mut m, &flags);
+                let ash = compute_anchor_shift(&m, flags.anchor.as_ref().unwrap_or(&Anchor::Origin));
+                if ash.len_sq() > 1e-10 {
+                    m.translate(ash);
+                }
+                let mut placed = Mesh::new();
+                emit_instanced(&mut placed, &m, pos, &flags, None);
+                i = next_i;
+                placed
+            } else if head_op == "use" {
+                let (_tag, def_name, pos, flags) = self.parse_use_line(&sub_tokens[1..], lineno)?;
+                let body = self.defs.get(&def_name).ok_or_else(|| {
+                    format!("line {lineno}: unknown def template '{def_name}'")
+                })?;
+                let mut merged_ov = overrides.clone();
+                for (k, v) in &flags.color_overrides {
+                    merged_ov.insert(k.clone(), v.clone());
+                }
+                let mut m = self.eval_lines(body, item_mat, &merged_ov, depth + 1)?;
+                apply_deformers(&mut m, &flags);
+                let ash = compute_anchor_shift(&m, flags.anchor.as_ref().unwrap_or(&Anchor::Origin));
+                if ash.len_sq() > 1e-10 {
+                    m.translate(ash);
+                }
+                let mut placed = Mesh::new();
+                emit_instanced(&mut placed, &m, pos, &flags, None);
+                i += 1;
+                placed
+            } else {
+                let mut m = Mesh::new();
+                self.eval_primitive(&mut m, &head_op, &sub_tokens[1..], item_mat, overrides, lineno)?;
+                i += 1;
+                m
+            };
+
+            if acc.tris.is_empty() && csg_op == CsgOp::Union {
+                acc = operand;
+            } else {
+                acc = apply_csg(&acc, &operand, csg_op);
+            }
+        }
+        Ok(acc)
+    }
+
+    fn eval_sdf_block(
+        &mut self,
+        lines: &[RawLine],
+        inherited_mat: Option<&str>,
+        overrides: &HashMap<String, String>,
+        res: usize,
+        smooth: bool,
+    ) -> Result<Mesh, String> {
+        let mut prims: Vec<SdfPrim> = Vec::new();
+        for line in lines {
+            let lineno = line.lineno;
+            let op0 = line.tokens[0].to_ascii_lowercase();
+            if op0.starts_with('$') {
+                parse_var_line(&line.tokens, &mut self.env, lineno)?;
+                continue;
+            }
+
+            let (mut sdf_op, rest_start) = match op0.as_str() {
+                "add" | "uni" | "union" => (SdfOp::Union, 1usize),
+                "sub" | "cut" | "diff" => (SdfOp::Subtract, 1usize),
+                "int" | "intersect" => (SdfOp::Intersect, 1usize),
+                "paint" | "col" => (SdfOp::Paint, 1usize),
+                _ => (SdfOp::Union, 0usize),
+            };
+            if rest_start >= line.tokens.len() {
+                return Err(format!("line {lineno}: SDF op '{op0}' requires a primitive"));
+            }
+
+            // Support both `sub sph mat ...` and `sub mat sph ...`
+            let mut toks = line.tokens[rest_start..].to_vec();
+            let mut item_mat = inherited_mat;
+            let owned_mat: String;
+            if rest_start == 1
+                && toks.len() >= 2
+                && !is_sdf_prim(&toks[0])
+                && is_sdf_prim(&toks[1])
+            {
+                owned_mat = toks.remove(0);
+                item_mat = Some(owned_mat.as_str());
+            }
+
+            let shape_op = toks[0].to_ascii_lowercase();
+            let mut pos_args = Vec::new();
+            let mut flag_tokens = Vec::new();
+            for tok in &toks[1..] {
+                if is_flag_token(tok) {
+                    flag_tokens.push(tok.clone());
+                } else {
+                    pos_args.push(tok.clone());
+                }
+            }
+            let flags = parse_flags(&flag_tokens, &self.env, lineno)?;
+            if let Some(op_s) = flags.extras.get("op") {
+                sdf_op = match op_s.to_ascii_lowercase().as_str() {
+                    "sub" | "cut" => SdfOp::Subtract,
+                    "int" | "intersect" => SdfOp::Intersect,
+                    "paint" => SdfOp::Paint,
+                    _ => SdfOp::Union,
+                };
+            }
+            let smooth_k = flags
+                .extras
+                .get("k")
+                .map(|v| self.env.eval_f32(v))
+                .transpose()
+                .map_err(|e| format!("line {lineno}: {e}"))?
+                .unwrap_or(0.0)
+                .max(0.0);
+            let round = flags
+                .extras
+                .get("rnd")
+                .or_else(|| flags.extras.get("bev"))
+                .map(|v| self.env.eval_f32(v))
+                .transpose()
+                .map_err(|e| format!("line {lineno}: {e}"))?
+                .unwrap_or(0.0)
+                .max(0.0);
+
+            let (mat_str, geom_args) = if let Some(im) = item_mat {
+                if !pos_args.is_empty() && !pos_args[0].contains(',') {
+                    (pos_args[0].as_str(), &pos_args[1..])
+                } else {
+                    (im, &pos_args[..])
+                }
+            } else {
+                if pos_args.is_empty() {
+                    return Err(format!("line {lineno}: SDF '{shape_op}' requires a material"));
+                }
+                (pos_args[0].as_str(), &pos_args[1..])
+            };
+            let mat = self.resolve_mat_name(mat_str, overrides, lineno)?;
+
+            // Collect mirrored variants (identity + mirrored axes)
+            let mut mirror_signs = vec![Vec3::ONE];
+            for &ax in &flags.mirror {
+                let cur_len = mirror_signs.len();
+                for j in 0..cur_len {
+                    let mut s = mirror_signs[j];
+                    match ax {
+                        'x' => s.x = -s.x,
+                        'y' => s.y = -s.y,
+                        'z' => s.z = -s.z,
+                        _ => {}
+                    }
+                    mirror_signs.push(s);
+                }
+            }
+
+            let make_inv_rot = |rot_deg: Vec3, ms: Vec3| -> Mat4 {
+                let rx = if ms.y * ms.z < 0.0 { -rot_deg.x } else { rot_deg.x };
+                let ry = if ms.x * ms.z < 0.0 { -rot_deg.y } else { rot_deg.y };
+                let rz = if ms.x * ms.y < 0.0 { -rot_deg.z } else { rot_deg.z };
+                Mat4::rot_x(-rx).mul(Mat4::rot_y(-ry)).mul(Mat4::rot_z(-rz))
+            };
+
+            let mul_sign = |v: Vec3, ms: Vec3| -> Vec3 { Vec3::new(v.x * ms.x, v.y * ms.y, v.z * ms.z) };
+
+            for ms in mirror_signs {
+                let shape = match shape_op.as_str() {
+                    "sph" | "sphere" => {
+                        if geom_args.len() < 2 {
+                            return Err(format!("line {lineno}: sdf sph requires <x,y,z> <r>"));
+                        }
+                        let c = mul_sign(self.parse_vec3(&geom_args[0], lineno)?, ms);
+                        let r = self.env.eval_f32(&geom_args[1]).map_err(|e| format!("line {lineno}: {e}"))?;
+                        SdfShape::Sphere { center: c, radius: r.max(1e-4) }
+                    }
+                    "ell" | "ellipsoid" => {
+                        if geom_args.len() < 2 {
+                            return Err(format!("line {lineno}: sdf ell requires <x,y,z> <rx,ry,rz>"));
+                        }
+                        let c = mul_sign(self.parse_vec3(&geom_args[0], lineno)?, ms);
+                        let r = self.parse_vec3(&geom_args[1], lineno)?;
+                        SdfShape::Ellipsoid {
+                            center: c,
+                            radii: r,
+                            inv_rot: make_inv_rot(flags.rot, ms),
+                        }
+                    }
+                    "cap" | "capsule" => {
+                        if geom_args.len() >= 3 && geom_args[1].split(',').count() == 3 {
+                            // Point-to-point tapered capsule: cap <mat> <x0,y0,z0> <x1,y1,z1> <r0[,r1]>
+                            let a = mul_sign(self.parse_vec3(&geom_args[0], lineno)?, ms);
+                            let b = mul_sign(self.parse_vec3(&geom_args[1], lineno)?, ms);
+                            let rv = self.parse_f32_list(&geom_args[2], lineno)?;
+                            let r0 = rv[0].max(1e-4);
+                            let r1 = rv.get(1).copied().unwrap_or(r0).max(1e-4);
+                            SdfShape::Capsule { a, b, r0, r1 }
+                        } else if geom_args.len() >= 2 {
+                            // Centered capsule: cap <mat> <x,y,z> <r,h|r0,r1,h> [r=...]
+                            let c = mul_sign(self.parse_vec3(&geom_args[0], lineno)?, ms);
+                            let rv = self.parse_f32_list(&geom_args[1], lineno)?;
+                            let (r0, r1, h) = match rv.len() {
+                                2 => (rv[0], rv[0], rv[1]),
+                                3 => (rv[0], rv[1], rv[2]),
+                                _ => return Err(format!("line {lineno}: sdf cap expects <r,h> or <x1,y1,z1> <r0[,r1]>")),
+                            };
+                            let half = ((h - r0 - r1) * 0.5).max(0.0);
+                            let rot_m = Mat4::from_trs(Vec3::ZERO, flags.rot, Vec3::ONE);
+                            let off = mul_sign(rot_m.transform_point(Vec3::new(0.0, half, 0.0)), ms);
+                            SdfShape::Capsule { a: c - off, b: c + off, r0: r0.max(1e-4), r1: r1.max(1e-4) }
+                        } else {
+                            return Err(format!("line {lineno}: sdf cap requires <x0,y0,z0> <x1,y1,z1> <r0[,r1]> or <x,y,z> <r,h>"));
+                        }
+                    }
+                    "box" | "cube" => {
+                        if geom_args.len() < 2 {
+                            return Err(format!("line {lineno}: sdf box requires <x,y,z> <sx,sy,sz>"));
+                        }
+                        let c = mul_sign(self.parse_vec3(&geom_args[0], lineno)?, ms);
+                        let sz = self.parse_vec3(&geom_args[1], lineno)?;
+                        SdfShape::RoundBox {
+                            center: c,
+                            half: sz * 0.5,
+                            round,
+                            inv_rot: make_inv_rot(flags.rot, ms),
+                        }
+                    }
+                    "cyl" | "cylinder" => {
+                        if geom_args.len() < 2 {
+                            return Err(format!("line {lineno}: sdf cyl requires <x,y,z> <r,h>"));
+                        }
+                        let c = mul_sign(self.parse_vec3(&geom_args[0], lineno)?, ms);
+                        let rv = self.parse_f32_list(&geom_args[1], lineno)?;
+                        if rv.len() < 2 {
+                            return Err(format!("line {lineno}: sdf cyl expects <r,h>"));
+                        }
+                        SdfShape::RoundCyl {
+                            center: c,
+                            radius: rv[0].max(1e-4),
+                            half_h: (rv[1] * 0.5).max(1e-4),
+                            round,
+                            inv_rot: make_inv_rot(flags.rot, ms),
+                        }
+                    }
+                    "tor" | "torus" => {
+                        if geom_args.len() < 2 {
+                            return Err(format!("line {lineno}: sdf tor requires <x,y,z> <R,r>"));
+                        }
+                        let c = mul_sign(self.parse_vec3(&geom_args[0], lineno)?, ms);
+                        let rv = self.parse_f32_list(&geom_args[1], lineno)?;
+                        if rv.len() < 2 {
+                            return Err(format!("line {lineno}: sdf tor expects <R,r>"));
+                        }
+                        SdfShape::Torus {
+                            center: c,
+                            major: rv[0].max(1e-4),
+                            minor: rv[1].max(1e-4),
+                            inv_rot: make_inv_rot(flags.rot, ms),
+                        }
+                    }
+                    other => {
+                        return Err(format!(
+                            "line {lineno}: unknown SDF primitive '{other}' (use: sph, ell, cap, box, cyl, tor)"
+                        ));
+                    }
+                };
+                prims.push(SdfPrim { shape, op: sdf_op, smooth_k, mat });
+            }
+        }
+        Ok(build_sdf_mesh(&prims, res, smooth))
+    }
+
+    fn parse_f32_list(&self, s: &str, lineno: usize) -> Result<Vec<f32>, String> {
+        self.env
+            .eval_list_f32(s)
+            .map_err(|e| format!("line {lineno}: {e}"))
     }
 
     fn parse_grp_header(
@@ -1038,7 +1443,7 @@ fn collect_block(
     let mut i = start;
     while i < lines.len() {
         let op = lines[i].tokens[0].to_ascii_lowercase();
-        if op == "def" || op == "grp" {
+        if op == "def" || op == "grp" || op == "col" || op == "csg" || op == "sdf" || op == "meta" {
             depth += 1;
             body.push(lines[i].clone());
         } else if op == "end" {
@@ -1104,6 +1509,23 @@ fn is_flag_token(tok: &str) -> bool {
     } else {
         false
     }
+}
+
+fn is_mesh_op(tok: &str) -> bool {
+    matches!(
+        tok.to_ascii_lowercase().as_str(),
+        "box" | "cube" | "cyl" | "cone" | "cap" | "wdg" | "wedge" | "pyr" | "pyramid"
+        | "ico" | "sphere" | "tor" | "torus" | "pri" | "prism" | "lat" | "lathe"
+        | "tub" | "tube" | "lof" | "loft" | "ter" | "terrain" | "tri" | "use" | "grp"
+    )
+}
+
+fn is_sdf_prim(tok: &str) -> bool {
+    matches!(
+        tok.to_ascii_lowercase().as_str(),
+        "sph" | "sphere" | "ell" | "ellipsoid" | "cap" | "capsule"
+        | "box" | "cube" | "cyl" | "cylinder" | "tor" | "torus"
+    )
 }
 
 fn strip_mdl_comment(line: &str) -> &str {

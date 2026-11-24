@@ -334,6 +334,46 @@ fn build_gltf_payload(
         }
     }
 
+    let mut gltf_meshes = vec![obj(vec![
+        ("name", JsonVal::Str(name.into())),
+        ("primitives", JsonVal::Arr(primitives)),
+    ])];
+    let mut gltf_nodes: Vec<JsonVal> = Vec::new();
+    let mut child_indices: Vec<JsonVal> = Vec::new();
+
+    for col in &mesh.colliders {
+        if col.tris.is_empty() {
+            continue;
+        }
+        let col_refs: Vec<&Triangle> = col.tris.iter().collect();
+        let mut col_prim = append_primitive_buffers(&col_refs, &mut bin, &mut buffer_views, &mut accessors);
+        if let JsonVal::Obj(ref mut map) = col_prim {
+            map.push(("material".into(), JsonVal::Int(0)));
+        }
+        let mesh_idx = gltf_meshes.len() as i64;
+        gltf_meshes.push(obj(vec![
+            ("name", JsonVal::Str(col.name.clone())),
+            ("primitives", JsonVal::Arr(vec![col_prim])),
+        ]));
+        let node_idx = (1 + child_indices.len()) as i64;
+        child_indices.push(JsonVal::Int(node_idx));
+        gltf_nodes.push(obj(vec![
+            ("name", JsonVal::Str(col.name.clone())),
+            ("mesh", JsonVal::Int(mesh_idx)),
+        ]));
+    }
+
+    let mut root_node_fields = vec![
+        ("name", JsonVal::Str(name.into())),
+        ("mesh", JsonVal::Int(0)),
+    ];
+    if !child_indices.is_empty() {
+        root_node_fields.push(("children", JsonVal::Arr(child_indices)));
+    }
+    let mut all_nodes = Vec::with_capacity(1 + gltf_nodes.len());
+    all_nodes.push(obj(root_node_fields));
+    all_nodes.extend(gltf_nodes);
+
     pad4(&mut bin);
     let buffer_obj = if is_glb {
         obj(vec![("byteLength", JsonVal::Int(bin.len() as i64))])
@@ -361,20 +401,8 @@ fn build_gltf_payload(
                 JsonVal::Arr(vec![JsonVal::Int(0)]),
             )])]),
         ),
-        (
-            "nodes",
-            JsonVal::Arr(vec![obj(vec![
-                ("name", JsonVal::Str(name.into())),
-                ("mesh", JsonVal::Int(0)),
-            ])]),
-        ),
-        (
-            "meshes",
-            JsonVal::Arr(vec![obj(vec![
-                ("name", JsonVal::Str(name.into())),
-                ("primitives", JsonVal::Arr(primitives)),
-            ])]),
-        ),
+        ("nodes", JsonVal::Arr(all_nodes)),
+        ("meshes", JsonVal::Arr(gltf_meshes)),
         ("materials", JsonVal::Arr(materials)),
         (
             "samplers",
