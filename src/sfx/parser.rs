@@ -2,7 +2,9 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use crate::common::expr::ExprEnv;
-use crate::sfx::dsp::{EnvSpec, FilterMode, LfoSpec, LfoTarget, LfoWave, NoiseColor, SweepSpec, WaveType};
+use crate::sfx::dsp::{
+    EnvSpec, FilterMode, LfoSpec, LfoTarget, LfoWave, NoiseColor, SweepCurve, SweepSpec, WaveType,
+};
 use crate::sfx::fx::FxSpec;
 use crate::sfx::theory::note_to_hz;
 
@@ -67,6 +69,7 @@ pub enum LayerKind {
         wave: WaveType,
         freq: f64,
         pwm: f64,
+        phase: f64,
         cycle_lock: bool,
     },
     Supersaw {
@@ -81,6 +84,7 @@ pub enum LayerKind {
         mod_ratio: f64,
         mod_index: f64,
         mod_decay: Option<f64>,
+        phase: f64,
     },
     Modal {
         freq: f64,
@@ -451,10 +455,12 @@ fn parse_single_layer(
             let wave = parse_wave(&pos_args[0], lineno)?;
             let freq = parse_freq_expr(&pos_args[1], env, lineno)?;
             let pwm = opt_eval(&flags, "pwm", 0.5, env, lineno)?;
+            let phase = opt_eval(&flags, "ph", 0.0, env, lineno)?.rem_euclid(1.0);
             LayerKind::Osc {
                 wave,
                 freq,
                 pwm,
+                phase,
                 cycle_lock: cl_global,
             }
         }
@@ -489,11 +495,13 @@ fn parse_single_layer(
                 Some(s) => Some(env.eval(s).map_err(|e| format!("line {lineno}: {e}"))?),
                 None => None,
             };
+            let phase = opt_eval(&flags, "ph", 0.0, env, lineno)?.rem_euclid(1.0);
             LayerKind::Fm {
                 freq,
                 mod_ratio,
                 mod_index,
                 mod_decay,
+                phase,
             }
         }
         "mod" => {
@@ -808,8 +816,57 @@ fn parse_env(s: &str, env: &ExprEnv, lineno: usize) -> Result<EnvSpec, String> {
     }
 }
 
-/// Parse `start>end:dur` or multi-stage `v0>v1:t1>v2:t2` into absolute `(time, value)` points.
-fn parse_sweep(s: &str, env: &ExprEnv, exp: bool, lineno: usize) -> Result<SweepSpec, String> {
+fn parse_sweep_curve(tok: &str) -> Option<SweepCurve> {
+    match tok.to_ascii_lowercase().as_str() {
+        "exp" | "exponential" => Some(SweepCurve::Exp),
+        "lin" | "linear" => Some(SweepCurve::Lin),
+        "log" | "logarithmic" => Some(SweepCurve::Log),
+        "sm" | "smooth" | "smoothstep" => Some(SweepCurve::Smooth),
+        _ => None,
+    }
+}
+
+/// Parse `start>end:dur[:curve]`, multi-stage `v0>v1:t1>v2:t2[:curve]`,
+/// or piecewise `t0:v0,t1:v1,...[:curve]` (accepting Hz or note names) into `(time, value)` points.
+fn parse_sweep(s: &str, env: &ExprEnv, default_exp: bool, lineno: usize) -> Result<SweepSpec, String> {
+    let mut curve = if default_exp {
+        SweepCurve::Exp
+    } else {
+        SweepCurve::Lin
+    };
+
+    // Piecewise `t0:v0,t1:v1,...[:curve]` format (no `>`)
+    if !s.contains('>') {
+        let mut pts = Vec::new();
+        let items: Vec<&str> = s.split(',').collect();
+        for (idx, item) in items.iter().enumerate() {
+            let parts: Vec<&str> = item.split(':').collect();
+            if parts.len() < 2 {
+                return Err(format!(
+                    "line {lineno}: sweep expects start>end:dur or t0:v0,t1:v1,..., got '{s}'"
+                ));
+            }
+            if parts.len() >= 3 && idx == items.len() - 1 {
+                if let Some(c) = parse_sweep_curve(parts[2]) {
+                    curve = c;
+                } else {
+                    return Err(format!(
+                        "line {lineno}: unknown sweep curve '{}' (use exp|lin|log|sm)",
+                        parts[2]
+                    ));
+                }
+            }
+            let t = env.eval(parts[0]).map_err(|e| format!("line {lineno}: {e}"))?;
+            let val = parse_freq_expr(parts[1], env, lineno)?;
+            pts.push((t, val));
+        }
+        if pts.is_empty() {
+            return Err(format!("line {lineno}: empty sweep '{s}'"));
+        }
+        pts.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+        return Ok(SweepSpec { points: pts, curve });
+    }
+
     let segs: Vec<&str> = s.split('>').collect();
     if segs.len() < 2 {
         return Err(format!("line {lineno}: sweep expects start>end:dur, got '{s}'"));
@@ -818,18 +875,25 @@ fn parse_sweep(s: &str, env: &ExprEnv, exp: bool, lineno: usize) -> Result<Sweep
     let mut pts = vec![(0.0, v0)];
     let mut cur_t = 0.0;
     for &seg in &segs[1..] {
-        let (vs, ts) = seg
-            .split_once(':')
-            .ok_or_else(|| format!("line {lineno}: sweep target needs val:time in '{seg}'"))?;
-        let val = parse_freq_expr(vs, env, lineno)?;
-        let dt = env.eval(ts).map_err(|e| format!("line {lineno}: {e}"))?;
+        let parts: Vec<&str> = seg.split(':').collect();
+        if parts.len() < 2 {
+            return Err(format!("line {lineno}: sweep target needs val:time in '{seg}'"));
+        }
+        let val = parse_freq_expr(parts[0], env, lineno)?;
+        let dt = env.eval(parts[1]).map_err(|e| format!("line {lineno}: {e}"))?;
+        if let Some(cs) = parts.get(2) {
+            if let Some(c) = parse_sweep_curve(cs) {
+                curve = c;
+            } else {
+                return Err(format!(
+                    "line {lineno}: unknown sweep curve '{cs}' (use exp|lin|log|sm)"
+                ));
+            }
+        }
         cur_t += dt.max(0.0005);
         pts.push((cur_t, val));
     }
-    Ok(SweepSpec {
-        points: pts,
-        exponential: exp,
-    })
+    Ok(SweepSpec { points: pts, curve })
 }
 
 /// Format: `target:rate:depth[:wave][:phase]` comma-separated (e.g. `g:6:.4,cf:6:300:sin:.25`)

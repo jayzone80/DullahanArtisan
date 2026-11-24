@@ -1,0 +1,172 @@
+pal ../palette.pal
+# Machinist's Oak Workbench & Manufactured Tools (Face-Weighted Normals `wn=1` + 1-Segment Bevels + CSG + Animated Child Nodes)
+$bw=1.84  $bd=0.82  $bh=0.86  $top_t=0.075  $leg=0.082
+
+# ============================================================================
+# 1. Heavy Butcher-Block Oak Workbench (chamfered timber + iron gussets + drawer)
+# ============================================================================
+# Thick chamfered butcher-block slab (wn=1 keeps top dead-flat with glossy bevel edges!)
+box @tabletop  wood_oak   0,$bh-$top_t/2,0         $bw,$top_t,$bd       bev=.016 wn=1
+box @back_lip  wood_dark  0,$bh+.028,-$bd/2+.022   $bw-.02,.058,.038    bev=.007 wn=1
+box @front_rim wood_light 0,$bh-$top_t/2,$bd/2+.001 $bw-.06,.042,.010   bev=.004 wn=1
+
+# Four stout mortised oak legs (mirrored X and Z)
+box @legs      wood_oak   $bw/2-.11,($bh-$top_t)/2,$bd/2-.095  $leg,$bh-$top_t,$leg  bev=.010 wn=1 m=xz
+# Rubber leveling feet pads grounded at Y=0
+box @feet      rubber_dark $bw/2-.11,.012,$bd/2-.095  $leg+.008,.024,$leg+.008 bev=.004 wn=1 m=xz
+
+# Upper apron frame & lower stretcher rails
+box @apron_f   wood_dark  0,$bh-$top_t-.075,$bd/2-.095   $bw-.26,.14,.032  bev=.006 wn=1 m=z
+box @apron_s   wood_dark  $bw/2-.11,$bh-$top_t-.075,0    .032,.14,$bd-.22  bev=.006 wn=1 m=x
+box @rail_lo_f wood_oak   0,.22,$bd/2-.095               $bw-.26,.06,.036  bev=.006 wn=1 m=z
+box @rail_lo_s wood_oak   $bw/2-.11,.22,0                .036,.06,$bd-.22  bev=.006 wn=1 m=x
+
+# Heavy iron L-brackets & bolts reinforcing leg corners
+box @brack_f   iron_dark  $bw/2-.175,$bh-$top_t-.075,$bd/2-.076 .075,.095,.012 bev=.003 wn=1 m=xz
+cyl @bolt_f    alloy_light $bw/2-.195,$bh-$top_t-.050,$bd/2-.068 .009,.009,.010 r=90,0,0 seg=6 bev=.002 wn=1 m=xz
+cyl @bolt_f2   alloy_light $bw/2-.195,$bh-$top_t-.100,$bd/2-.068 .009,.009,.010 r=90,0,0 seg=6 bev=.002 wn=1 m=xz
+
+# Lower slatted timber storage shelf (5 evenly spaced planks across [-0.26..+0.26])
+box @shelf     wood_plank 0,.255,-.26  $bw-.28,.024,.112  bev=.005 wn=1 rep=5:0,0,.130
+
+# Under-bench tool drawer (left side) with brass cup pull
+grp @drawer -.38,$bh-$top_t-.078,$bd/2-.072
+  box wood_light  0,0,0      .68,.125,.028  bev=.007 wn=1
+  box brass_gold  0,.008,.022 .14,.032,.018 bev=.005 wn=1
+  box wood_dark   0,-.006,.024 .10,.018,.014 bev=.003
+end
+
+# ============================================================================
+# 2. Manufactured Red Stamped-Steel Mechanic's Toolbox (angled on left of bench)
+# ============================================================================
+$tbx=-.48  $tbz=-.05  $tby=$bh
+grp @toolbox_body $tbx,$tby,$tbz r=0,14,0
+  # Main stamped steel box with crisp 1-segment chamfer + wn=1 highlights
+  box red_paint   0,.105,0        .54,.21,.24   bev=.018 wn=1
+  # Subtle dark red recessed waist trim band
+  box red_dark    0,.198,0        .544,.018,.244 bev=.004 wn=1
+  # Brushed steel corner protectors (mirrored X & Z)
+  box steel_mid   .264,.024,.114  .028,.044,.028 bev=.005 wn=1 m=xz
+  # Two gleaming chrome-steel front draw latches (mirrored X)
+  box alloy_light .14,.175,.124   .042,.062,.016 bev=.004 wn=1 m=x
+  box iron_dark   .14,.190,.132   .026,.022,.010 bev=.002 wn=1 m=x
+  # Center padlock hasp & rear hinge knuckles
+  box steel_mid   0,.185,.123     .034,.044,.012 bev=.003 wn=1
+  cyl steel_mid   .16,.206,-.122  .008,.008,.055 r=0,0,90 seg=8 bev=.002 wn=1 m=x
+end
+
+# Animated child glTF node for the hinged toolbox lid (pivoted at rear hinge!)
+node ToolboxLid $tbx,$tby+.208,$tbz r=0,14,0
+  # Hipped beveled stamped-steel lid + carrying handle (in local space relative to hinge/center)
+  box red_paint   0,.034,0        .542,.070,.242 t=.88,.76 bev=.015 wn=1
+  # Steel handle brackets & tubular grip bar
+  box steel_mid   .11,.078,0      .022,.028,.032 bev=.004 wn=1 m=x
+  cyl steel_mid   .11,.098,0      .009,.009,.036 seg=8 bev=.002 wn=1 m=x
+  cyl alloy_light 0,.114,0        .010,.010,.228 r=0,0,90 seg=10 bev=.003 wn=1
+  cyl rubber_dark 0,.114,0        .015,.015,.125 r=0,0,90 seg=12 bev=.004 wn=1
+end
+
+# ============================================================================
+# 3. Cast-Iron Machinist's Bench Vise (bolted to front-right corner of bench)
+# ============================================================================
+$vx=.64  $vz=.21  $vy=$bh
+grp @vise_base $vx,$vy,$vz r=0,-24,0
+  # Heavy beveled cast-iron swivel base bolted to tabletop
+  cyl slate_blue  0,.016,0        .125,.118,.032 seg=16 bev=.007 wn=1
+  cyl alloy_light 0,.034,0        .012,.012,.014 seg=6  bev=.002 wn=1 rad=3:.098:y:30
+  # Fixed rear body & flat machined anvil pad
+  box slate_blue  0,.090,-.035    .135,.125,.165 bev=.014 wn=1
+  box slate_blue  0,.165,-.020    .148,.095,.075 bev=.012 wn=1
+  # Machined flat anvil deck on top of rear housing
+  box steel_mid   0,.156,-.075    .105,.016,.075 bev=.004 wn=1
+  # Hardened steel serrated fixed jaw plate (faces +Z)
+  box alloy_light 0,.176,.022     .144,.048,.014 bev=.003 wn=1
+  # Slide channel collar on front face
+  box iron_dark   0,.090,.052     .078,.062,.024 bev=.005 wn=1
+end
+
+# Animated child glTF node for the sliding front vise jaw + T-handle lead screw!
+node ViseJaw $vx,$vy,$vz r=0,-24,0
+  # Square machined steel slide bar extending through housing
+  box steel_mid   0,.088,.085     .052,.042,.195 bev=.005 wn=1
+  # Heavy beveled movable cast-iron front jaw
+  box slate_blue  0,.135,.155     .148,.150,.068 bev=.013 wn=1
+  # Hardened steel movable jaw plate (faces -Z toward fixed jaw)
+  box alloy_light 0,.176,.116     .144,.048,.014 bev=.003 wn=1
+  # Machined brass thrust collar & chrome T-bar lead screw handle
+  cyl brass_gold  0,.095,.198     .022,.022,.022 r=90,0,0 seg=12 bev=.004 wn=1
+  cyl alloy_light 0,.095,.226     .016,.016,.042 r=90,0,0 seg=10 bev=.004 wn=1
+  cyl alloy_light 0,.095,.236     .007,.007,.240 r=0,0,90 seg=10 bev=.002 wn=1
+  ico alloy_light .124,.095,.236  .014 sub=1 sm=1 m=x
+end
+
+# ============================================================================
+# 4. Manufactured Hand Tools on the Oak Tabletop (crisp metallic bevel highlights!)
+# ============================================================================
+# A) Machined Combination Steel Wrench (CSG open hex jaw + box end + beveled beam)
+grp @wrench .14,$bh+.009,.18 r=0,32,0
+  box alloy_light 0,0,0           .26,.012,.030  bev=.004 wn=1
+  # Open-end jaw with crisp CSG hexagonal cutout
+  csg steel_mid -.145,0,0 wn=1
+    cyl alloy_light 0,0,0         .034,.034,.016 seg=12 bev=.003
+    sub box steel_mid -.024,0,0   .044,.024,.032
+  end
+  # Box-end ring with CSG through-hole
+  csg steel_mid .142,0,0 wn=1
+    cyl alloy_light 0,0,0         .028,.028,.016 seg=12 bev=.003
+    sub cyl steel_mid 0,0,0       .015,.015,.026 seg=8
+  end
+end
+
+# B) Machinist's Ball-Peen Hammer (beveled forged steel head + contoured oak handle)
+grp @hammer .04,$bh+.024,-.12 r=0,-24,0
+  # Contoured ash/oak handle
+  box wood_plank  -.06,0,0        .32,.024,.032  t=.85,.90 bev=.007 wn=1
+  box wood_dark   -.20,0,0        .06,.026,.034  bev=.006 wn=1
+  # Forged chamfered steel hammer head (flat face + spherical ball peen)
+  box iron_dark    .11,.002,0     .042,.044,.092 bev=.008 wn=1
+  cyl steel_mid    .11,.002,.054  .020,.018,.022 r=90,0,0 seg=12 bev=.004 wn=1
+  cyl iron_dark    .11,.002,-.052 .016,.014,.018 r=90,0,0 seg=10 bev=.003 wn=1
+  ico steel_mid    .11,.002,-.064 .016 sub=1 sm=1
+end
+
+# C) Machined Brass Workshop Oil Can (beveled turned body + brass spout, clear hero sightline)
+grp @oil_can .28,$bh,-.22 r=0,20,0
+  cyl brass_gold  0,.052,0        .054,.036,.104 seg=16 bev=.009 wn=1
+  cyl copper_patina 0,.108,0      .022,.020,.016 seg=12 bev=.003 wn=1
+  cyl brass_gold  0,.168,0        .011,.003,.112 seg=10 bev=.001 wn=1
+  box brass_gold  -.058,.048,0    .022,.062,.012 bev=.003 wn=1
+end
+
+# D) Carpenter's / Machinist's Try-Square (walnut stock + brass plate + steel blade)
+grp @try_square -.14,$bh+.009,.24 r=0,-14,0
+  box wood_dark   -.075,.006,0    .165,.022,.038 bev=.005 wn=1
+  box brass_gold  -.075,.006,.020 .160,.020,.005 bev=.002 wn=1
+  box alloy_light .015,.003,-.095 .032,.005,.240 bev=.001 wn=1
+  cyl brass_gold  -.115,.018,0    .005,.005,.003 seg=8 rep=3:.04,0,0
+end
+
+# E) Heavy Hex Machined Nuts & Flanged Steel Coupling on the bench & lower shelf
+csg @hex_nut .28,$bh+.012,.02 wn=1
+  cyl steel_mid   0,0,0           .026,.026,.022 seg=6 bev=.004
+  sub cyl iron_dark 0,0,0         .013,.013,.032 seg=10
+end
+csg @brass_nut .34,$bh+.010,.06 r=0,25,0 wn=1
+  cyl brass_gold  0,0,0           .022,.022,.018 seg=6 bev=.003
+  sub cyl wood_dark 0,0,0         .011,.011,.028 seg=10
+end
+
+# Lower shelf props: Heavy wooden parts crate + machined steel flanged drum
+grp @lower_crate -.36,.268,0 r=0,8,0
+  csg wood_dark 0,.11,0 wn=1
+    box wood_oak   0,0,0          .44,.22,.34 bev=.010
+    sub box wood_dark 0,.03,0     .39,.20,.29
+  end
+  box iron_dark   .222,.05,0      .010,.035,.344 bev=.002 wn=1 m=x
+  box iron_dark   .222,.17,0      .010,.035,.344 bev=.002 wn=1 m=x
+end
+grp @steel_drum .34,.268,-.04
+  cyl steel_mid   0,.095,0        .135,.135,.190 seg=16 bev=.014 wn=1
+  cyl iron_dark   0,.192,0        .105,.105,.016 seg=16 bev=.004 wn=1
+  cyl brass_gold  0,.204,0        .026,.026,.018 seg=6  bev=.004 wn=1 rad=6:.085:y
+end

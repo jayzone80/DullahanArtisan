@@ -270,11 +270,19 @@ impl EnvSpec {
     }
 }
 
-/// Pitch or cutoff sweep envelope (`start > end : dur`, or multi-segment points `(time, value)`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SweepCurve {
+    Exp,
+    Lin,
+    Log,
+    Smooth,
+}
+
+/// Pitch or cutoff sweep envelope (`start>end:dur[:curve]` or piecewise `t0:v0,t1:v1,...[:curve]`).
 #[derive(Debug, Clone)]
 pub struct SweepSpec {
     pub points: Vec<(f64, f64)>,
-    pub exponential: bool,
+    pub curve: SweepCurve,
 }
 
 impl SweepSpec {
@@ -290,10 +298,22 @@ impl SweepSpec {
             let (t1, v1) = w[1];
             if t <= t1 {
                 let u = ((t - t0) / (t1 - t0).max(1e-9)).clamp(0.0, 1.0);
-                if self.exponential && v0 > 0.0 && v1 > 0.0 {
-                    return v0 * (v1 / v0).powf(u);
-                }
-                return v0 + (v1 - v0) * u;
+                return match self.curve {
+                    SweepCurve::Exp if v0 > 0.0 && v1 > 0.0 => v0 * (v1 / v0).powf(u),
+                    SweepCurve::Lin | SweepCurve::Exp => v0 + (v1 - v0) * u,
+                    SweepCurve::Log => {
+                        let ul = (1.0 + u * 9.0).log10(); // fast initial rise, slow settle
+                        v0 + (v1 - v0) * ul
+                    }
+                    SweepCurve::Smooth => {
+                        let us = u * u * (3.0 - 2.0 * u);
+                        if v0 > 0.0 && v1 > 0.0 {
+                            v0 * (v1 / v0).powf(us)
+                        } else {
+                            v0 + (v1 - v0) * us
+                        }
+                    }
+                };
             }
         }
         self.points.last().unwrap().1

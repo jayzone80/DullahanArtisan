@@ -798,21 +798,35 @@ fn draw_axis_triad(canvas: &mut Canvas, cam: &Camera) {
 }
 
 pub fn render_to_png(mesh: &Mesh, palette: &Palette, opts: &RenderOptions) -> Vec<u8> {
+    let flat_owned;
+    let render_mesh = if mesh.nodes.is_empty() {
+        mesh
+    } else {
+        flat_owned = mesh.flattened_visual();
+        &flat_owned
+    };
     let mut o = opts.clone();
     if o.hud && o.label.is_none() {
-        let bb = mesh.compute_bounds();
+        let bb = render_mesh.compute_bounds();
         let sz = if bb.is_valid() { bb.size() } else { Vec3::ZERO };
         o.label = Some(format!(
             "YAW:{:.0} PITCH:{:.0} | {:.2}x{:.2}x{:.2} | {} TRIS",
-            o.yaw_deg, o.pitch_deg, sz.x, sz.y, sz.z, mesh.tris.len()
+            o.yaw_deg, o.pitch_deg, sz.x, sz.y, sz.z, render_mesh.tris.len()
         ));
     }
-    let c = render_view_canvas(mesh, palette, &o);
+    let c = render_view_canvas(render_mesh, palette, &o);
     encode_rgba(c.width as u32, c.height as u32, &c.rgba)
 }
 
 /// Render a 2x2 turntable contact sheet (`yaw`, `yaw+90`, `yaw+180`, `yaw+270`) with clean HUD footer.
 pub fn render_turntable_png(mesh: &Mesh, palette: &Palette, opts: &RenderOptions) -> Vec<u8> {
+    let flat_owned;
+    let mesh = if mesh.nodes.is_empty() {
+        mesh
+    } else {
+        flat_owned = mesh.flattened_visual();
+        &flat_owned
+    };
     let cell_w = opts.width.max(160);
     let cell_h = opts.height.max(120);
     let total_w = cell_w as usize * 2;

@@ -25,7 +25,7 @@ Run `artisan spec [pal|mesh|sfx|svg|terrain]` at any time to print the authorita
 | Task | Command |
 | :--- | :--- |
 | Build 3 PBR atlases (+ swatch sheet) | `artisan pal <file.pal> [-o <prefix>] [--sheet <png>]` |
-| Build 3D model + validate + render | `artisan mesh <file.mdl> [-p <pal>] [-o <out.glb\|.gltf>] [--ext-pal <prefix>] [--render <hero.png>] [--turn <turn.png>] [--focus <id>]` |
+| Build 3D model + validate + render | `artisan mesh <file.mdl> [-p <pal>] [-o <out.glb\|.gltf>] [--ext-pal <prefix>] [--ov old:new] [--render <hero.png>] [--turn <turn.png>] [--focus <id>]` |
 | Build eroded terrain maps + `.glb` | `artisan terrain <file.ter> [-p <pal>] [-o <prefix>] [--preview <diag.png>] [--mesh <out.glb>] [--render <3d.png>] [--grid N] [--tris N] [--skirt 0\|1] [--col <node>]` |
 | Heightmap + weightmap PNG → `.glb` | `artisan terrain --from-heightmap <h.png> [--weightmap <w.png>] [-p <pal>] [--world W,H,D] [--grid N] [--tris N] --mesh <out.glb>` |
 | Build audio + validate + plot | `artisan sfx <file.sfx> [-k <kit>] [-o <out.wav>] [--var N] [--plot <diag.png>] [--size WxH] [--seed S]` |
@@ -49,12 +49,12 @@ Adapt visual style, acoustic character, and geometric/sonic detail freely to the
 
 ### 2. 3D Models (`.mdl`)
 - **Coordinate space**: Right-handed Y-up (`+X` right, `+Y` up, `+Z` front, `Y=0` ground), outward CCW winding.
-- **Structure**: Reference palette via `pal <rel.pal>`. Define `$var = expr` dimensions at the top to prevent placement drift. Tag key sub-parts with `@id` for targeted edits and `--focus <id>` inspection renders. Factor repeating assemblies into `def <name> ... end` and stamp via `use` (with `ov=old:new`, `m=x|y|z|xz`, `rep=`, `rad=`). Define optional simplified physics colliders in `col <node_name> ... end` blocks (exported as separate child glTF nodes; inspect fit with `--colliders`).
-- **Primitives & Sculpting**: `box` (`t=`, `o=`, `bev=`), `cyl` (`rt=0` for cone, `cap=0` for open ring, `bev=`), `cap`, `wdg`, `pyr`, `ico` (`sub=`, watertight `jit=`, `mats=`), `tor`, `pri` (2D polygon extrude + `bev=`), `lat` (Y-axis revolve), `tub` (3D polyline sweep), `lof` (elliptical spine sweep with per-section colors), `ter` (noisy/mounded heightfield with `thk=`), `tri`.
+- **Structure**: Reference palette via `pal <rel.pal>` and import shared part kits via `use <rel.mdl>` (or `inc <rel.mdl>`). Define `$var = expr` dimensions at the top to prevent placement drift. Tag key sub-parts with `@id` for targeted edits and `--focus <id>` inspection renders. Factor repeating assemblies into `def <name> ... end` and stamp via `use` (with `ov=old:new`, `m=x|y|z|xz`, `rep=`, `rad=`), or generate colorways/liveries at build time with CLI `--ov old:new`. Put animated sub-parts in `node <name> [x,y,z] [r=...] [s=...] ... end` (exported as named glTF child nodes with local pivots!) and simplified physics colliders in `col <node_name> ... end` (inspect fit with `--colliders`).
+- **Primitives & Sculpting**: `box` (`t=`, `o=`, `bev=`), `cyl` (`rt=0` for cone, `cap=0` for open ring, `bev=`), `cap`, `wdg`, `pyr`, `ico` (`sub=`, watertight `jit=`, `mats=`), `tor`, `pri` (2D polygon extrude + `bev=`), `lat` (Y-axis revolve), `tub` (3D polyline sweep), `lof` (elliptical spine sweep with per-section colors), `ter` (noisy/mounded heightfield with `thk=`), `tri` (`ds=1` for double-sided foliage), `rib` (curved tapered double-sided blade/ribbon `w0,w1,h[,curve]`).
 - **Metaballs & Booleans**:
   - `sdf [@id] [res=28] [sm=1] ... end` (alias `meta`): Surface-Nets organic sculpting (`sph`, `ell`, point-to-point tapered `cap <x0,y0,z0> <x1,y1,z1> <r0[,r1]>`, `box`, `cyl`, `tor`) with smooth blending (`k=`), `sub`/`int`, mirroring (`m=x`), and geometry-preserving `paint` volumes for fur/organic markings.
   - `csg [@id] ... end`: exact BSP mesh booleans (`add`/`sub`/`int` on any primitive, `use`, or `grp`) for crisp hard-surface cutouts where carved interior faces automatically inherit the cutter's palette swatch.
-- **Anchors & Deformers**: Centered primitives (`box`, `cyl`, `cap`, `wdg`, `pyr`, `ico`, `tor`) default to `a=c`; explicit-coordinate primitives (`pri`, `lat`, `tub`, `lof`, `ter`) default to `a=o`. Use `a=b` to ground upright parts on `Y`. Add `sm=1` for smooth vertex normals, `bev=` for specular-catching chamfers, and `bend=` / `twist=` for curved forms.
+- **Anchors & Deformers**: Centered primitives (`box`, `cyl`, `cap`, `wdg`, `pyr`, `ico`, `tor`) default to `a=c`; `rib` defaults to `a=b`; explicit-coordinate primitives (`pri`, `lat`, `tub`, `lof`, `ter`) default to `a=o`. Use `a=b` to ground upright parts on `Y`. Add `sm=1` for crease-aware smooth normals, **`wn=1`** (or `wn=2..12` / `sm=w`) for **Face-Weighted Normals** (keeps large flat panels dead-flat while making 1-segment `bev=` chamfers gleam with smooth specular edge highlights!), `bev=` for chamfers, and `bend=` / `twist=` for curved forms.
 - **Technical Visual QA** (inspect `--render` and `--turn` PNGs):
   - Check all four turnaround angles for silhouette, proportions, and alignment against the ground grid and RGB axis triad.
   - Backface culling is always enabled: any dark hole or missing surface indicates an open single-sided shell or inverted face.
@@ -63,7 +63,7 @@ Adapt visual style, acoustic character, and geometric/sonic detail freely to the
 
 ### 3. Procedural Audio & Music (`.sfx` / `.kit`)
 - **Header**: `sfx <name> [dur=S | bpm=B bars=N bpb=4] [sr=44100] [ch=2] [loop=0|1] [xfade=S] [curve=lin|eqp] [norm=-1] [seed=S]`.
-- **Generators & Signal Flow**: Compose leaf generators (`osc`, `ssaw`, `fm`, `mod`, `plk`, `noi`) and reusable `def` voices (local or via `use <kit>`) with `ref`, `grp`, `pat` (step grid), `seq` (notes/chords in beats), and `sct` (seeded scatter). Chain stereo FX left-to-right with `|` (`flt`, `drv`, `crush`, `cho`, `dly`, `rev`, `cmp`, `wid`) and master processing via `bus | ...`.
+- **Generators & Signal Flow**: Compose leaf generators (`osc` with `ph=0..1`, `ssaw`, `fm` with `ph=0..1`, `mod`, `plk`, `noi`) and reusable `def` voices (local or via `use <kit>`) with `ref`, `grp`, `pat` (step grid), `seq` (notes/chords in beats), and `sct` (seeded scatter). `penv=` and `cenv=` accept both `start>end:dur[:exp|lin|log|sm]` and piecewise `t0:v0,t1:v1,...[:curve]` points (Hz or note names). Chain stereo FX left-to-right with `|` (`flt`, `drv`, `crush`, `cho`, `dly`, `rev`, `cmp`, `wid`) and master processing via `bus | ...`.
 - **Looping & Variations**:
   - Set `loop=1` for automatic 2-cycle pre-warming (filters, delays, and reverbs wrap smoothly into cycle 1).
   - Use `cl=1` on periodic oscillators/LFOs and `curve=lin` for phase-coherent loops; use `curve=eqp` for uncorrelated noise/ambient beds.

@@ -1,15 +1,15 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use crate::common::expr::ExprEnv;
-use crate::common::math::{Mat4, Vec2, Vec3};
+use crate::common::math::{Aabb, Mat4, Vec2, Vec3};
 use crate::mesh::csg::{apply_csg, CsgOp};
-use crate::mesh::geom::{ColliderMesh, Mesh};
+use crate::mesh::geom::{ChildNodeMesh, ColliderMesh, Mesh};
 use crate::mesh::palette::{Palette, ResolvedMat};
 use crate::mesh::primitives::{
     build_box, build_capsule, build_cylinder, build_icosphere, build_lathe, build_loft,
-    build_noisy_plane, build_prism, build_pyramid, build_torus, build_tube, build_wedge, FaceMats,
-    LoftSection,
+    build_noisy_plane, build_prism, build_pyramid, build_ribbon, build_torus, build_tube,
+    build_wedge, FaceMats, LoftSection,
 };
 use crate::mesh::sdf::{build_sdf_mesh, SdfOp, SdfPrim, SdfShape};
 
@@ -70,6 +70,7 @@ struct CommonFlags {
     anchor: Option<Anchor>,
     mirror: Vec<char>,
     smooth: bool,
+    weighted_normals: Option<f32>,
     bend: Option<BendSpec>,
     twist: Option<TwistSpec>,
     repeat: Option<RepeatSpec>,
@@ -87,6 +88,7 @@ impl Default for CommonFlags {
             anchor: None,
             mirror: Vec::new(),
             smooth: false,
+            weighted_normals: None,
             bend: None,
             twist: None,
             repeat: None,
@@ -119,13 +121,23 @@ pub fn load_and_compile_model(
     mdl_path: &Path,
     palette_override: Option<&Path>,
 ) -> Result<(ParsedModel, Palette, PathBuf), String> {
+    let empty = HashMap::new();
+    load_and_compile_model_with_overrides(mdl_path, palette_override, &empty)
+}
+
+pub fn load_and_compile_model_with_overrides(
+    mdl_path: &Path,
+    palette_override: Option<&Path>,
+    cli_overrides: &HashMap<String, String>,
+) -> Result<(ParsedModel, Palette, PathBuf), String> {
     let text = std::fs::read_to_string(mdl_path)
         .map_err(|e| format!("failed to read model '{}': {e}", mdl_path.display()))?;
+    let base_dir = mdl_path.parent().unwrap_or_else(|| Path::new("."));
     let pal_rel = peek_palette_path(&text);
     let pal_path = if let Some(ov) = palette_override {
         ov.to_path_buf()
     } else if let Some(ref rel) = pal_rel {
-        mdl_path.parent().unwrap_or_else(|| Path::new(".")).join(rel)
+        base_dir.join(rel)
     } else {
         return Err(format!(
             "model '{}' has no 'pal <path>' directive and no -p palette flag was provided",
@@ -133,17 +145,119 @@ pub fn load_and_compile_model(
         ));
     };
     let palette = Palette::load_file(&pal_path)?;
+    // Validate CLI material override targets early so typos fail with a clear error
+    for (old_m, new_m) in cli_overrides {
+        palette
+            .resolve_mat(new_m)
+            .map_err(|e| format!("--ov {old_m}:{new_m}: {e}"))?;
+    }
     let name = mdl_path
         .file_stem()
         .and_then(|s| s.to_str())
         .unwrap_or("model")
         .to_string();
-    let parsed = compile_model(&text, &name, &palette)?;
+    let parsed = compile_model_with_dir(&text, &name, &palette, Some(base_dir), cli_overrides)?;
     Ok((parsed, palette, pal_path))
 }
 
 pub fn compile_model(text: &str, name: &str, palette: &Palette) -> Result<ParsedModel, String> {
+    let empty = HashMap::new();
+    compile_model_with_dir(text, name, palette, None, &empty)
+}
+
+fn is_kit_include_line(tokens: &[String]) -> Option<&str> {
+    if tokens.len() < 2 {
+        return None;
+    }
+    let op = tokens[0].to_ascii_lowercase();
+    if op == "inc" || op == "include" {
+        return Some(tokens[1].as_str());
+    }
+    if op == "use" && tokens.len() == 2 && tokens[1].to_ascii_lowercase().ends_with(".mdl") {
+        return Some(tokens[1].as_str());
+    }
+    None
+}
+
+fn load_mdl_kit_recursive(
+    kit_path: &Path,
+    env: &mut ExprEnv,
+    defs: &mut HashMap<String, Vec<RawLine>>,
+    visited: &mut HashSet<PathBuf>,
+) -> Result<(), String> {
+    let canon = std::fs::canonicalize(kit_path).unwrap_or_else(|_| kit_path.to_path_buf());
+    if !visited.insert(canon) {
+        return Ok(());
+    }
+    let text = std::fs::read_to_string(kit_path)
+        .map_err(|e| format!("failed to read included model kit '{}': {e}", kit_path.display()))?;
+    let kit_dir = kit_path.parent().unwrap_or_else(|| Path::new("."));
+
+    let mut raw_lines = Vec::new();
+    for (idx, line) in text.lines().enumerate() {
+        let lineno = idx + 1;
+        let clean = strip_mdl_comment(line).trim();
+        if clean.is_empty() {
+            continue;
+        }
+        let tokens = tokenize_line(clean);
+        if tokens.is_empty() {
+            continue;
+        }
+        if tokens[0].eq_ignore_ascii_case("pal") {
+            continue;
+        }
+        if let Some(rel) = is_kit_include_line(&tokens) {
+            let sub_path = kit_dir.join(rel);
+            load_mdl_kit_recursive(&sub_path, env, defs, visited)?;
+            continue;
+        }
+        if tokens[0].starts_with('$') {
+            parse_var_line(&tokens, env, lineno)
+                .map_err(|e| format!("kit '{}': {e}", kit_path.display()))?;
+            continue;
+        }
+        raw_lines.push(RawLine { lineno, tokens });
+    }
+
+    let mut i = 0usize;
+    while i < raw_lines.len() {
+        let op = raw_lines[i].tokens[0].to_ascii_lowercase();
+        if op == "def" {
+            let lineno = raw_lines[i].lineno;
+            if raw_lines[i].tokens.len() < 2 {
+                return Err(format!(
+                    "kit '{}' line {lineno}: 'def' requires a template name",
+                    kit_path.display()
+                ));
+            }
+            let def_name = raw_lines[i].tokens[1].clone();
+            let (body, next_i) = collect_block(&raw_lines, i + 1, lineno, "def")
+                .map_err(|e| format!("kit '{}': {e}", kit_path.display()))?;
+            defs.insert(def_name, body);
+            i = next_i;
+        } else if matches!(op.as_str(), "grp" | "col" | "node" | "csg" | "sdf" | "meta") {
+            // Skip any top-level preview blocks inside a kit file
+            let (_body, next_i) = collect_block(&raw_lines, i + 1, raw_lines[i].lineno, &op)
+                .map_err(|e| format!("kit '{}': {e}", kit_path.display()))?;
+            i = next_i;
+        } else {
+            i += 1;
+        }
+    }
+    Ok(())
+}
+
+pub fn compile_model_with_dir(
+    text: &str,
+    name: &str,
+    palette: &Palette,
+    base_dir: Option<&Path>,
+    cli_overrides: &HashMap<String, String>,
+) -> Result<ParsedModel, String> {
     let mut env = ExprEnv::new();
+    let mut defs: HashMap<String, Vec<RawLine>> = HashMap::new();
+    let mut visited_kits: HashSet<PathBuf> = HashSet::new();
     let mut raw_lines = Vec::new();
     let mut pal_rel = None;
 
@@ -163,6 +277,13 @@ pub fn compile_model(text: &str, name: &str, palette: &Palette) -> Result<Parsed
             }
             continue;
         }
+        if let Some(rel) = is_kit_include_line(&tokens) {
+            let kit_path = base_dir
+                .map(|d| d.join(rel))
+                .unwrap_or_else(|| PathBuf::from(rel));
+            load_mdl_kit_recursive(&kit_path, &mut env, &mut defs, &mut visited_kits)?;
+            continue;
+        }
         // Allow one or multiple `$var=expr` assignments on a single line
         if tokens[0].starts_with('$') {
             parse_var_line(&tokens, &mut env, lineno)?;
@@ -172,7 +293,6 @@ pub fn compile_model(text: &str, name: &str, palette: &Palette) -> Result<Parsed
     }
 
     // Separate top-level `def <name> ... end` blocks from root statements
-    let mut defs: HashMap<String, Vec<RawLine>> = HashMap::new();
     let mut root_lines = Vec::new();
     let mut i = 0usize;
     while i < raw_lines.len() {
@@ -195,6 +315,7 @@ pub fn compile_model(text: &str, name: &str, palette: &Palette) -> Result<Parsed
     let mut ctx = EvalCtx {
         palette,
         defs: &defs,
+        cli_overrides,
         env,
         part_count: 0,
     };
@@ -212,6 +333,7 @@ pub fn compile_model(text: &str, name: &str, palette: &Palette) -> Result<Parsed
 struct EvalCtx<'a> {
     palette: &'a Palette,
     defs: &'a HashMap<String, Vec<RawLine>>,
+    cli_overrides: &'a HashMap<String, String>,
     env: ExprEnv,
     part_count: usize,
 }
@@ -223,13 +345,19 @@ impl<'a> EvalCtx<'a> {
         overrides: &HashMap<String, String>,
         lineno: usize,
     ) -> Result<ResolvedMat, String> {
-        let mapped = overrides
+        let local_mapped = overrides
             .get(raw)
             .or_else(|| overrides.get(&raw.to_ascii_lowercase()))
             .map(|s| s.as_str())
             .unwrap_or(raw);
+        let final_mapped = self
+            .cli_overrides
+            .get(local_mapped)
+            .or_else(|| self.cli_overrides.get(&local_mapped.to_ascii_lowercase()))
+            .map(|s| s.as_str())
+            .unwrap_or(local_mapped);
         self.palette
-            .resolve_mat(mapped)
+            .resolve_mat(final_mapped)
             .map_err(|e| format!("line {lineno}: {e}"))
     }
 
@@ -253,6 +381,112 @@ impl<'a> EvalCtx<'a> {
             if op.starts_with('$') {
                 parse_var_line(&line.tokens, &mut self.env, lineno)?;
                 i += 1;
+                continue;
+            }
+
+            if op == "node" {
+                let (body, next_i) = collect_block(lines, i + 1, lineno, "node")?;
+                if line.tokens.len() < 2 {
+                    return Err(format!(
+                        "line {lineno}: 'node' requires a child node name (e.g. node LeverPivot 0,1,0)"
+                    ));
+                }
+                let node_name = line.tokens[1]
+                    .strip_prefix('@')
+                    .unwrap_or(&line.tokens[1])
+                    .to_string();
+                let (_tag, pos, node_mat, flags) = self.parse_grp_header(&line.tokens[2..], lineno)?;
+                let child_mat = node_mat.as_deref().or(inherited_mat);
+                let mut child_mesh = self.eval_lines(&body, child_mat, overrides, depth + 1)?;
+                apply_deformers(&mut child_mesh, &flags);
+                let anchor_shift = compute_anchor_shift(
+                    &child_mesh,
+                    flags.anchor.as_ref().unwrap_or(&Anchor::Origin),
+                );
+                if anchor_shift.len_sq() > 1e-10 {
+                    child_mesh.translate(anchor_shift);
+                }
+
+                // Helper to register one ChildNodeMesh + propagate its world-space part_bounds for --focus
+                let mut push_node = |n_name: String, n_pos: Vec3, n_rot: Vec3, n_scale: Vec3, local_m: &Mesh| {
+                    if local_m.tris.is_empty() {
+                        return;
+                    }
+                    let xform = Mat4::from_trs(n_pos, n_rot, n_scale);
+                    let mut n_bb = Aabb::empty();
+                    for t in &local_m.tris {
+                        n_bb.expand(xform.transform_point(t.a));
+                        n_bb.expand(xform.transform_point(t.b));
+                        n_bb.expand(xform.transform_point(t.c));
+                    }
+                    if n_bb.is_valid() {
+                        out.part_bounds
+                            .entry(n_name.clone())
+                            .and_modify(|e| e.expand_aabb(&n_bb))
+                            .or_insert(n_bb);
+                    }
+                    for (sub_id, sub_bb) in &local_m.part_bounds {
+                        let mut xbb = Aabb::empty();
+                        for sx in [sub_bb.min.x, sub_bb.max.x] {
+                            for sy in [sub_bb.min.y, sub_bb.max.y] {
+                                for sz in [sub_bb.min.z, sub_bb.max.z] {
+                                    xbb.expand(xform.transform_point(Vec3::new(sx, sy, sz)));
+                                }
+                            }
+                        }
+                        out.part_bounds
+                            .entry(sub_id.clone())
+                            .and_modify(|e| e.expand_aabb(&xbb))
+                            .or_insert(xbb);
+                    }
+                    // Propagate any nested colliders transformed into root space
+                    for col in &local_m.colliders {
+                        let mut cm = Mesh::new();
+                        let src_c = Mesh {
+                            tris: col.tris.clone(),
+                            ..Mesh::default()
+                        };
+                        cm.append_transformed(&src_c, xform, None);
+                        if !cm.tris.is_empty() {
+                            out.colliders.push(ColliderMesh {
+                                name: col.name.clone(),
+                                tris: cm.tris,
+                            });
+                        }
+                    }
+                    out.nodes.push(ChildNodeMesh {
+                        name: n_name,
+                        translation: n_pos,
+                        rotation_deg: n_rot,
+                        scale: n_scale,
+                        tris: local_m.tris.clone(),
+                    });
+                };
+
+                push_node(node_name.clone(), pos, flags.rot, flags.scale, &child_mesh);
+                // If mirror flags are set on a node, emit mirrored sibling nodes (`<name>_m<axes>`)
+                let m_count = 1usize << flags.mirror.len();
+                for mask in 1..m_count {
+                    let mut m_pos = pos;
+                    let mut m_scale = Vec3::ONE;
+                    let mut suffix = String::new();
+                    for (bit, &axis) in flags.mirror.iter().enumerate() {
+                        if (mask & (1 << bit)) != 0 {
+                            suffix.push(axis);
+                            match axis {
+                                'x' => { m_pos.x = -m_pos.x; m_scale.x = -1.0; }
+                                'y' => { m_pos.y = -m_pos.y; m_scale.y = -1.0; }
+                                _ => { m_pos.z = -m_pos.z; m_scale.z = -1.0; }
+                            }
+                        }
+                    }
+                    let mut mirrored = Mesh::new();
+                    let local_mat = Mat4::scale(m_scale).mul(Mat4::from_trs(Vec3::ZERO, flags.rot, flags.scale));
+                    mirrored.append_transformed(&child_mesh, local_mat, None);
+                    push_node(format!("{node_name}_m{suffix}"), m_pos, Vec3::ZERO, Vec3::ONE, &mirrored);
+                }
+
+                i = next_i;
                 continue;
             }
 
@@ -1023,16 +1257,42 @@ impl<'a> EvalCtx<'a> {
                 let p0 = self.parse_vec3_colon(&rest[0], lineno)?;
                 let p1 = self.parse_vec3_colon(&rest[1], lineno)?;
                 let p2 = self.parse_vec3_colon(&rest[2], lineno)?;
+                let ds = self.opt_bool(&flags, "ds", false);
+                let off = self.opt_f32(&flags, "off", 0.001, lineno)?.abs().max(1e-4);
                 let mut m = Mesh::new();
-                m.add_tri(p0, p1, p2, mat);
+                if ds {
+                    let n = (p1 - p0).cross(p2 - p0).normalized();
+                    let shift = if n.len_sq() > 0.5 { n * off } else { Vec3::ZERO };
+                    let m_back = fc.pick(mat, &["k", "back", "b", "bot", "bottom"]);
+                    m.add_tri(p0 + shift, p1 + shift, p2 + shift, mat);
+                    m.add_tri(p0 - shift, p2 - shift, p1 - shift, m_back);
+                } else {
+                    m.add_tri(p0, p1, p2, mat);
+                }
                 m
+            }
+            "rib" | "ribbon" => {
+                default_anchor = Anchor::Bottom;
+                if rest.len() < 2 {
+                    return Err(format!("line {lineno}: rib requires <pos> <w0,w1,h[,curve]>"));
+                }
+                pos = self.parse_vec3(&rest[0], lineno)?;
+                let dims = self.parse_f32_list(&rest[1], lineno)?;
+                if dims.len() < 3 || dims.len() > 4 {
+                    return Err(format!("line {lineno}: rib expects w0,w1,h or w0,w1,h,curve"));
+                }
+                let curve = dims.get(3).copied().unwrap_or(0.0);
+                let seg = self.opt_u32(&flags, "seg", 4, lineno)?;
+                let ds = self.opt_bool(&flags, "ds", true);
+                let off = self.opt_f32(&flags, "off", 0.001, lineno)?;
+                build_ribbon(dims[0], dims[1], dims[2], curve, seg, ds, off, mat, &fc)
             }
             _ => {
                 return Err(format!("line {lineno}: unknown opcode '{op}'"));
             }
         };
 
-        if flags.smooth {
+        if flags.smooth && flags.weighted_normals.is_none() {
             local.compute_smooth_normals();
         }
         apply_deformers(&mut local, &flags);
@@ -1220,11 +1480,15 @@ impl<'a> EvalCtx<'a> {
 }
 
 fn apply_deformers(mesh: &mut Mesh, flags: &CommonFlags) {
+    let smooth_any = flags.smooth || flags.weighted_normals.is_some();
     if let Some(ref tw) = flags.twist {
-        mesh.apply_twist(tw.deg, tw.axis, flags.smooth);
+        mesh.apply_twist(tw.deg, tw.axis, smooth_any);
     }
     if let Some(ref bd) = flags.bend {
-        mesh.apply_bend(bd.deg, bd.along, bd.toward, flags.smooth);
+        mesh.apply_bend(bd.deg, bd.along, bd.toward, smooth_any);
+    }
+    if let Some(power) = flags.weighted_normals {
+        mesh.compute_weighted_normals(power);
     }
 }
 
@@ -1333,7 +1597,28 @@ fn parse_flags(tokens: &[String], env: &ExprEnv, lineno: usize) -> Result<Common
                 }
             }
             "sm" | "smooth" => {
-                f.smooth = v == "1" || v.eq_ignore_ascii_case("true");
+                let vl = v.to_ascii_lowercase();
+                if matches!(vl.as_str(), "w" | "wn" | "weighted") {
+                    f.weighted_normals = Some(4.0);
+                    f.smooth = true;
+                } else {
+                    f.smooth = vl == "1" || vl == "true";
+                }
+            }
+            "wn" | "weighted" => {
+                let vl = v.to_ascii_lowercase();
+                if vl == "0" || vl == "false" || vl == "no" {
+                    f.weighted_normals = None;
+                } else if vl == "1" || vl == "true" || vl == "yes" {
+                    f.weighted_normals = Some(4.0);
+                } else {
+                    let p = env.eval_f32(v).map_err(|e| format!("line {lineno}: {e}"))?;
+                    if p > 0.0 {
+                        f.weighted_normals = Some(p.clamp(1.0, 12.0));
+                    } else {
+                        f.weighted_normals = None;
+                    }
+                }
             }
             "bend" => {
                 let parts: Vec<&str> = v.split(':').collect();
@@ -1443,7 +1728,7 @@ fn collect_block(
     let mut i = start;
     while i < lines.len() {
         let op = lines[i].tokens[0].to_ascii_lowercase();
-        if op == "def" || op == "grp" || op == "col" || op == "csg" || op == "sdf" || op == "meta" {
+        if op == "def" || op == "grp" || op == "col" || op == "node" || op == "csg" || op == "sdf" || op == "meta" {
             depth += 1;
             body.push(lines[i].clone());
         } else if op == "end" {
@@ -1516,7 +1801,7 @@ fn is_mesh_op(tok: &str) -> bool {
         tok.to_ascii_lowercase().as_str(),
         "box" | "cube" | "cyl" | "cone" | "cap" | "wdg" | "wedge" | "pyr" | "pyramid"
         | "ico" | "sphere" | "tor" | "torus" | "pri" | "prism" | "lat" | "lathe"
-        | "tub" | "tube" | "lof" | "loft" | "ter" | "terrain" | "tri" | "use" | "grp"
+        | "tub" | "tube" | "lof" | "loft" | "ter" | "terrain" | "tri" | "rib" | "ribbon" | "use" | "grp" | "node"
     )
 }
 

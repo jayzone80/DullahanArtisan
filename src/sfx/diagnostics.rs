@@ -80,9 +80,24 @@ pub fn analyze_wav(buf: &AudioBuffer, expect_loop: bool) -> AudioMetrics {
     let peak_db = 20.0 * peak.max(1e-7).log10();
     let rms_db = 20.0 * (sq_sum / n as f64).sqrt().max(1e-7).log10();
     let dc_offset = (sum_l / n as f64).abs().max((sum_r / n as f64).abs());
-    let loop_seam_delta = (buf.left[n - 1] - buf.left[0])
-        .abs()
-        .max((buf.right[n - 1] - buf.right[0]).abs());
+    let channel_seam = |ch: &[f64]| -> f64 {
+        let len = ch.len();
+        if len < 3 {
+            return if len == 2 { (ch[0] - ch[1]).abs() } else { 0.0 };
+        }
+        let d_seam = ch[0] - ch[len - 1];
+        let raw = d_seam.abs();
+        let d_next = ch[1] - ch[0];
+        let d_prev = ch[len - 1] - ch[len - 2];
+        // Slope-aware continuity: eliminates false positives on high-frequency cycle-locked waves
+        // while catching real amplitude steps, DC pops, and phase discontinuities.
+        raw.min((d_seam - d_next).abs()).min((d_seam - d_prev).abs())
+    };
+    let loop_seam_delta = if buf.channels == 1 {
+        channel_seam(&buf.left)
+    } else {
+        channel_seam(&buf.left).max(channel_seam(&buf.right))
+    };
 
     if peak_db < -45.0 {
         errors.push(format!("audio is effectively silent (peak {peak_db:.1} dBFS)"));

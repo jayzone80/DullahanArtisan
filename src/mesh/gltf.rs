@@ -1,8 +1,26 @@
 use crate::common::base64;
 use crate::common::json::{obj, JsonVal};
-use crate::common::math::Aabb;
+use crate::common::math::{Aabb, Vec3};
 use crate::mesh::geom::{Mesh, Triangle};
 use crate::mesh::palette::Palette;
+
+fn quat_mul(a: [f32; 4], b: [f32; 4]) -> [f32; 4] {
+    let [ax, ay, az, aw] = a;
+    let [bx, by, bz, bw] = b;
+    [
+        aw * bx + ax * bw + ay * bz - az * by,
+        aw * by - ax * bz + ay * bw + az * bx,
+        aw * bz + ax * by - ay * bx + az * bw,
+        aw * bw - ax * bx - ay * by - az * bz,
+    ]
+}
+
+fn quat_from_euler_xyz_deg(rot: Vec3) -> [f32; 4] {
+    let (sx, cx) = (rot.x.to_radians() * 0.5).sin_cos();
+    let (sy, cy) = (rot.y.to_radians() * 0.5).sin_cos();
+    let (sz, cz) = (rot.z.to_radians() * 0.5).sin_cos();
+    quat_mul(quat_mul([0.0, 0.0, sz, cz], [0.0, sy, 0.0, cy]), [sx, 0.0, 0.0, cx])
+}
 
 #[derive(Debug, Clone)]
 pub struct ExportStats {
@@ -216,16 +234,19 @@ fn build_gltf_payload(
     is_glb: bool,
     external_palette_prefix: Option<&str>,
 ) -> Result<(JsonVal, Vec<u8>, ExportStats), String> {
-    if mesh.tris.is_empty() {
+    if mesh.tris.is_empty() && mesh.nodes.is_empty() {
         return Err("cannot export empty mesh (0 triangles)".into());
     }
-    let opaque: Vec<&Triangle> = mesh.tris.iter().filter(|t| !t.is_translucent).collect();
-    let translucent: Vec<&Triangle> = mesh.tris.iter().filter(|t| t.is_translucent).collect();
+
+    let any_opaque = mesh.tris.iter().any(|t| !t.is_translucent)
+        || mesh.nodes.iter().any(|n| n.tris.iter().any(|t| !t.is_translucent))
+        || mesh.colliders.iter().any(|c| !c.tris.is_empty());
+    let has_translucent = mesh.tris.iter().any(|t| t.is_translucent)
+        || mesh.nodes.iter().any(|n| n.tris.iter().any(|t| t.is_translucent));
 
     let mut bin: Vec<u8> = Vec::new();
     let mut buffer_views: Vec<JsonVal> = Vec::new();
     let mut accessors: Vec<JsonVal> = Vec::new();
-    let mut primitives: Vec<JsonVal> = Vec::new();
     let mut materials: Vec<JsonVal> = Vec::new();
 
     let make_mat = |mat_name: &str, alpha_mode: &str| -> JsonVal {
@@ -262,26 +283,117 @@ fn build_gltf_payload(
         ])
     };
 
-    if !opaque.is_empty() {
-        let mat_idx = materials.len();
+    let opaque_mat_idx = if any_opaque {
+        let idx = materials.len();
         materials.push(make_mat("palette_opaque", "OPAQUE"));
-        let mut prim = append_primitive_buffers(&opaque, &mut bin, &mut buffer_views, &mut accessors);
-        if let JsonVal::Obj(ref mut fields) = prim {
-            fields.push(("material".into(), JsonVal::Int(mat_idx as i64)));
-        }
-        primitives.push(prim);
-    }
-
-    let has_translucent = !translucent.is_empty();
-    if has_translucent {
-        let mat_idx = materials.len();
+        Some(idx)
+    } else {
+        None
+    };
+    let trans_mat_idx = if has_translucent {
+        let idx = materials.len();
         materials.push(make_mat("palette_translucent", "BLEND"));
-        let mut prim =
-            append_primitive_buffers(&translucent, &mut bin, &mut buffer_views, &mut accessors);
-        if let JsonVal::Obj(ref mut fields) = prim {
-            fields.push(("material".into(), JsonVal::Int(mat_idx as i64)));
+        Some(idx)
+    } else {
+        None
+    };
+
+    let mut build_prims = |tris: &[Triangle]| -> Vec<JsonVal> {
+        let opq: Vec<&Triangle> = tris.iter().filter(|t| !t.is_translucent).collect();
+        let trn: Vec<&Triangle> = tris.iter().filter(|t| t.is_translucent).collect();
+        let mut prims = Vec::new();
+        if !opq.is_empty() {
+            let mut p = append_primitive_buffers(&opq, &mut bin, &mut buffer_views, &mut accessors);
+            if let (JsonVal::Obj(ref mut fields), Some(mi)) = (&mut p, opaque_mat_idx) {
+                fields.push(("material".into(), JsonVal::Int(mi as i64)));
+            }
+            prims.push(p);
         }
-        primitives.push(prim);
+        if !trn.is_empty() {
+            let mut p = append_primitive_buffers(&trn, &mut bin, &mut buffer_views, &mut accessors);
+            if let (JsonVal::Obj(ref mut fields), Some(mi)) = (&mut p, trans_mat_idx) {
+                fields.push(("material".into(), JsonVal::Int(mi as i64)));
+            }
+            prims.push(p);
+        }
+        prims
+    };
+
+    let mut gltf_meshes: Vec<JsonVal> = Vec::new();
+    let mut gltf_nodes: Vec<JsonVal> = Vec::new();
+    let mut child_indices: Vec<JsonVal> = Vec::new();
+    let mut total_draw_calls = 0usize;
+    let mut total_tris = 0usize;
+
+    let root_mesh_idx = if !mesh.tris.is_empty() {
+        let prims = build_prims(&mesh.tris);
+        total_draw_calls += prims.len();
+        total_tris += mesh.tris.len();
+        let idx = gltf_meshes.len() as i64;
+        gltf_meshes.push(obj(vec![
+            ("name", JsonVal::Str(name.into())),
+            ("primitives", JsonVal::Arr(prims)),
+        ]));
+        Some(idx)
+    } else {
+        None
+    };
+
+    // Named visual child nodes (with local pivot translation/rotation/scale)
+    for cnode in &mesh.nodes {
+        if cnode.tris.is_empty() {
+            continue;
+        }
+        let prims = build_prims(&cnode.tris);
+        total_draw_calls += prims.len();
+        total_tris += cnode.tris.len();
+        let mesh_idx = gltf_meshes.len() as i64;
+        gltf_meshes.push(obj(vec![
+            ("name", JsonVal::Str(cnode.name.clone())),
+            ("primitives", JsonVal::Arr(prims)),
+        ]));
+        let node_idx = (1 + child_indices.len()) as i64;
+        child_indices.push(JsonVal::Int(node_idx));
+        let mut nf = vec![
+            ("name", JsonVal::Str(cnode.name.clone())),
+            ("mesh", JsonVal::Int(mesh_idx)),
+        ];
+        if cnode.translation.len_sq() > 1e-12 {
+            nf.push((
+                "translation",
+                JsonVal::Arr(vec![
+                    JsonVal::Num(cnode.translation.x as f64),
+                    JsonVal::Num(cnode.translation.y as f64),
+                    JsonVal::Num(cnode.translation.z as f64),
+                ]),
+            ));
+        }
+        if cnode.rotation_deg.len_sq() > 1e-12 {
+            let q = quat_from_euler_xyz_deg(cnode.rotation_deg);
+            nf.push((
+                "rotation",
+                JsonVal::Arr(vec![
+                    JsonVal::Num(q[0] as f64),
+                    JsonVal::Num(q[1] as f64),
+                    JsonVal::Num(q[2] as f64),
+                    JsonVal::Num(q[3] as f64),
+                ]),
+            ));
+        }
+        if (cnode.scale.x - 1.0).abs() > 1e-6
+            || (cnode.scale.y - 1.0).abs() > 1e-6
+            || (cnode.scale.z - 1.0).abs() > 1e-6
+        {
+            nf.push((
+                "scale",
+                JsonVal::Arr(vec![
+                    JsonVal::Num(cnode.scale.x as f64),
+                    JsonVal::Num(cnode.scale.y as f64),
+                    JsonVal::Num(cnode.scale.z as f64),
+                ]),
+            ));
+        }
+        gltf_nodes.push(obj(nf));
     }
 
     // 3 PBR Atlas images (BaseColor, ORM, Emissive)
@@ -334,13 +446,6 @@ fn build_gltf_payload(
         }
     }
 
-    let mut gltf_meshes = vec![obj(vec![
-        ("name", JsonVal::Str(name.into())),
-        ("primitives", JsonVal::Arr(primitives)),
-    ])];
-    let mut gltf_nodes: Vec<JsonVal> = Vec::new();
-    let mut child_indices: Vec<JsonVal> = Vec::new();
-
     for col in &mesh.colliders {
         if col.tris.is_empty() {
             continue;
@@ -348,7 +453,7 @@ fn build_gltf_payload(
         let col_refs: Vec<&Triangle> = col.tris.iter().collect();
         let mut col_prim = append_primitive_buffers(&col_refs, &mut bin, &mut buffer_views, &mut accessors);
         if let JsonVal::Obj(ref mut map) = col_prim {
-            map.push(("material".into(), JsonVal::Int(0)));
+            map.push(("material".into(), JsonVal::Int(opaque_mat_idx.unwrap_or(0) as i64)));
         }
         let mesh_idx = gltf_meshes.len() as i64;
         gltf_meshes.push(obj(vec![
@@ -363,10 +468,10 @@ fn build_gltf_payload(
         ]));
     }
 
-    let mut root_node_fields = vec![
-        ("name", JsonVal::Str(name.into())),
-        ("mesh", JsonVal::Int(0)),
-    ];
+    let mut root_node_fields = vec![("name", JsonVal::Str(name.into()))];
+    if let Some(rmi) = root_mesh_idx {
+        root_node_fields.push(("mesh", JsonVal::Int(rmi)));
+    }
     if !child_indices.is_empty() {
         root_node_fields.push(("children", JsonVal::Arr(child_indices)));
     }
@@ -428,10 +533,10 @@ fn build_gltf_payload(
     ]);
 
     let stats = ExportStats {
-        draw_calls: (if !opaque.is_empty() { 1 } else { 0 }) + (if has_translucent { 1 } else { 0 }),
+        draw_calls: total_draw_calls,
         has_translucent,
-        total_tris: mesh.tris.len(),
-        total_verts: mesh.tris.len() * 3,
+        total_tris,
+        total_verts: total_tris * 3,
     };
     Ok((root, bin, stats))
 }

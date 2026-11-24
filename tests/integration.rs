@@ -1,14 +1,18 @@
+use std::collections::HashMap;
 use std::path::Path;
 
 use dullahan_artisan::common::png::inspect_and_verify_png;
 use dullahan_artisan::mesh::gltf::{export_glb, export_gltf_json};
 use dullahan_artisan::mesh::palette::Palette;
-use dullahan_artisan::mesh::parser::{compile_model, load_and_compile_model};
+use dullahan_artisan::mesh::parser::{
+    compile_model, compile_model_with_dir, load_and_compile_model,
+    load_and_compile_model_with_overrides,
+};
 use dullahan_artisan::mesh::render::{render_to_png, render_turntable_png, RenderOptions};
 use dullahan_artisan::mesh::validator::{validate_glb_bytes, validate_gltf_json_str};
 use dullahan_artisan::sfx::diagnostics::{analyze_wav, render_diagnostic_png};
 use dullahan_artisan::sfx::engine::render_sound;
-use dullahan_artisan::sfx::parser::load_sound_file;
+use dullahan_artisan::sfx::parser::{load_sound_file, parse_sound_doc};
 use dullahan_artisan::sfx::wav::{decode_pcm16_bytes, encode_pcm16_bytes};
 use dullahan_artisan::svg::parser::{load_svg_file, parse_svg};
 use dullahan_artisan::svg::raster::{render_svg_png, SvgRenderOptions};
@@ -28,6 +32,7 @@ fn palette_and_all_example_models_build_validate_render() {
         "examples/models/modular_dungeon_kit.mdl",
         "examples/models/props_shotgun_medkit.mdl",
         "examples/models/fox_on_stones.mdl",
+        "examples/models/workbench_tools.mdl",
     ] {
         let (parsed, p, _) = load_and_compile_model(Path::new(mdl), None).unwrap();
         assert!(!parsed.mesh.tris.is_empty(), "{mdl} produced 0 tris");
@@ -212,4 +217,194 @@ fn example_terrain_erodes_decimates_and_roundtrips_heightmap() {
     let (glb2, _) = export_glb(&mesh2, &pal, "from_hm", None).unwrap();
     let rep2 = validate_glb_bytes(&glb2).unwrap();
     assert!(rep2.is_ok(), "from-heightmap GLB errors: {:?}", rep2.errors);
+}
+
+#[test]
+fn beveled_tapered_cylinder_smooth_normals_never_invert() {
+    let pal = Palette::load_file(Path::new("examples/palette.pal")).unwrap();
+    let src = r#"
+cyl iron_dark 0.5,0.5,0 0.165,0.155,0.045 seg=14 sm=1 bev=0.01 r=90,0,0 m=x
+cyl iron_dark 0.5,0.5,0 0.30,0.15,0.045   seg=14 sm=1 bev=0.01 r=90,0,0 m=x
+cyl steel_mid 0.0,0.5,0 0.40,0.08,0.04    seg=16 sm=1 bev=0.01 r=0,0,90 m=xz
+"#;
+    let parsed = compile_model(src, "bevel_cyl_repro", &pal).unwrap();
+    let (glb, _) = export_glb(&parsed.mesh, &pal, "bevel_cyl_repro", None).unwrap();
+    let rep = validate_glb_bytes(&glb).unwrap();
+    assert!(rep.is_ok(), "beveled tapered smooth cyl errors: {:?}", rep.errors);
+}
+
+#[test]
+fn mdl_kits_cli_overrides_child_nodes_and_foliage_primitives() {
+    let pal = Palette::load_file(Path::new("examples/palette.pal")).unwrap();
+    let tmp = std::env::temp_dir().join("artisan_test_kit_dir");
+    let _ = std::fs::create_dir_all(&tmp);
+    let kit_path = tmp.join("shared_parts.mdl");
+    std::fs::write(
+        &kit_path,
+        r#"
+$lug_r = 0.08
+def lift_lug
+  tor steel_mid 0,0,0 $lug_r,0.02 seg=10 tseg=6
+end
+"#,
+    )
+    .unwrap();
+
+    // Model using shared kit via `use shared_parts.mdl`, animated child `node`, `tri ds=1`, and `rib`
+    let src = r#"
+use shared_parts.mdl
+box @base olive_body 0,.25,0 1,.5,1 bev=.03
+use lift_lug 0,.55,0
+tri @leaf grass_light 0:0:0 .2:0:0 .1:.4:.05 ds=1
+rib @blade grass_mid .3,0,0 .08,0,.45,.15 seg=4 rad=4:.04:y
+
+node LeverPivot 0,.5,.2 r=0,0,20
+  cyl iron_dark 0,0,0 .03,.03,.5 a=b seg=8
+  ico red_paint 0,.5,0 .06 sub=1
+end
+"#;
+
+    // Atomic CLI override swap: olive_body <-> red_paint simultaneously!
+    let mut ov = HashMap::new();
+    ov.insert("olive_body".into(), "red_paint".into());
+    ov.insert("red_paint".into(), "olive_body".into());
+
+    let parsed = compile_model_with_dir(src, "switch_stand", &pal, Some(&tmp), &ov).unwrap();
+    assert_eq!(parsed.mesh.nodes.len(), 1);
+    assert_eq!(parsed.mesh.nodes[0].name, "LeverPivot");
+    assert!(parsed.mesh.part_bounds.contains_key("LeverPivot"));
+
+    // Verify atomic swap took effect on both root (`olive_body` -> `red_paint`) and child node (`red_paint` -> `olive_body`)
+    let red_uv = pal.resolve_mat("red_paint").unwrap().uv;
+    let olive_uv = pal.resolve_mat("olive_body").unwrap().uv;
+    assert!(parsed.mesh.tris.iter().any(|t| (t.uv.x - red_uv.x).abs() < 1e-4 && (t.uv.y - red_uv.y).abs() < 1e-4));
+    assert!(parsed.mesh.nodes[0].tris.iter().any(|t| (t.uv.x - olive_uv.x).abs() < 1e-4 && (t.uv.y - olive_uv.y).abs() < 1e-4));
+
+    // Export glTF & GLB and verify child node name, translation, rotation quaternion, and validation
+    let (gltf, stats) = export_gltf_json(&parsed.mesh, &pal, "switch_stand", None).unwrap();
+    assert!(stats.draw_calls >= 2);
+    assert!(gltf.contains("\"LeverPivot\""));
+    assert!(gltf.contains("\"translation\""));
+    assert!(gltf.contains("\"rotation\""));
+    let rep_gltf = validate_gltf_json_str(&gltf).unwrap();
+    assert!(rep_gltf.is_ok(), "child node glTF errors: {:?}", rep_gltf.errors);
+
+    let (glb, _) = export_glb(&parsed.mesh, &pal, "switch_stand", None).unwrap();
+    let rep_glb = validate_glb_bytes(&glb).unwrap();
+    assert!(rep_glb.is_ok(), "child node GLB errors: {:?}", rep_glb.errors);
+
+    // Render hero PNG including child node
+    let mut ropts = RenderOptions::default();
+    ropts.width = 240;
+    ropts.height = 180;
+    let png = render_to_png(&parsed.mesh, &pal, &ropts);
+    assert!(inspect_and_verify_png(&png).is_ok());
+
+    // Also test load_and_compile_model_with_overrides with bad override swatch fails loudly
+    let mdl_path = tmp.join("switch_stand.mdl");
+    let pal_abs = std::fs::canonicalize("examples/palette.pal").unwrap();
+    std::fs::write(&mdl_path, format!("pal {}\n{src}", pal_abs.display())).unwrap();
+    let mut bad_ov = HashMap::new();
+    bad_ov.insert("olive_body".into(), "nonexistent_swatch".into());
+    assert!(load_and_compile_model_with_overrides(&mdl_path, None, &bad_ov).is_err());
+
+    let _ = std::fs::remove_dir_all(&tmp);
+}
+
+#[test]
+fn sfx_piecewise_sweeps_mono_loop_norm_phase_and_slope_seam() {
+    // 1. Piecewise penv + cenv with note names and explicit curve
+    let bird_src = r#"
+sfx bird_chirp dur=.22 sr=22050 ch=1 norm=-1 seed=5
+fm C6 dur=.18 mr=1.5 mi=1.2 ph=.25 penv=0:C6,0.05:G6,0.12:D6,0.18:A6:sm cenv=0:1200,0.09:4200,0.18:1800:lin env=.005,.04,.6,.06 g=.8 | flt bp 2400 q=1.2
+"#;
+    let bird_doc = parse_sound_doc(bird_src, "bird_chirp", Path::new("."), None).unwrap();
+    let bird_buf = render_sound(&bird_doc, 0, None).unwrap();
+    let bird_m = analyze_wav(&bird_buf, false);
+    assert!(bird_m.is_ok(), "bird_chirp errors: {:?}", bird_m.errors);
+    assert!((bird_m.peak_db - (-1.0)).abs() < 0.15, "expected ~-1.0 dB, got {}", bird_m.peak_db);
+
+    // 2. Mono (ch=1) loop with stereo noise + reverb: on-disk WAV peak must match norm=-2.5 dB!
+    let hiss_src = r#"
+sfx air_hiss dur=.6 sr=22050 ch=1 loop=1 xfade=.05 curve=eqp norm=-2.5 seed=9
+noi pink dur=.6 g=.7 | flt bp 2200 q=1.2 | rev room=.4 mix=.35
+"#;
+    let hiss_doc = parse_sound_doc(hiss_src, "air_hiss", Path::new("."), None).unwrap();
+    let hiss_buf = render_sound(&hiss_doc, 0, None).unwrap();
+    let wav_bytes = encode_pcm16_bytes(&hiss_buf);
+    let disk_buf = decode_pcm16_bytes(&wav_bytes).unwrap();
+    let mem_m = analyze_wav(&hiss_buf, true);
+    let disk_m = analyze_wav(&disk_buf, true);
+    assert!(
+        (mem_m.peak_db - (-2.5)).abs() < 0.15,
+        "in-memory mono loop peak {} != -2.5 dB",
+        mem_m.peak_db
+    );
+    assert!(
+        (disk_m.peak_db - (-2.5)).abs() < 0.15,
+        "on-disk mono loop peak {} != -2.5 dB (was mem {})",
+        disk_m.peak_db,
+        mem_m.peak_db
+    );
+
+    // 3. High-frequency 3 kHz cycle-locked sine loop must NOT trigger false-positive seam warning
+    let screech_src = r#"
+sfx flange_screech dur=.5 sr=22050 ch=1 loop=1 xfade=.01 curve=lin norm=-2 seed=3
+osc sin 3000 dur=.5 cl=1 g=.8
+"#;
+    let screech_doc = parse_sound_doc(screech_src, "flange_screech", Path::new("."), None).unwrap();
+    let screech_buf = render_sound(&screech_doc, 0, None).unwrap();
+    let screech_m = analyze_wav(&screech_buf, true);
+    assert!(
+        screech_m.loop_seam_delta < 0.02,
+        "3 kHz cycle-locked sine had false-positive seam delta {}",
+        screech_m.loop_seam_delta
+    );
+    assert!(
+        screech_m.warnings.is_empty(),
+        "unexpected seam warning on 3 kHz sine: {:?}",
+        screech_m.warnings
+    );
+
+    // 4. Verify ph=.25 produces a cosine-like starting peak (|sample[0]| > 0.8 vs ~0 at ph=0)
+    let ph_src = r#"
+sfx phase_test dur=.05 sr=22050 ch=1 norm=-1
+osc sin 440 dur=.05 ph=.25 g=1
+"#;
+    let ph_doc = parse_sound_doc(ph_src, "phase_test", Path::new("."), None).unwrap();
+    let ph_buf = render_sound(&ph_doc, 0, None).unwrap();
+    assert!(ph_buf.left[0].abs() > 0.7, "expected ph=.25 peak near start, got {}", ph_buf.left[0]);
+}
+
+#[test]
+fn weighted_normals_keep_flat_faces_flat_and_bevels_smooth() {
+    let pal = Palette::load_file(Path::new("examples/palette.pal")).unwrap();
+    let src = r#"
+box steel_mid 0,.5,0 1,1,1 bev=.06 wn=1
+cyl brass_gold 1.5,.5,0 .35,.32,.8 seg=16 bev=.03 wn=1
+"#;
+    let parsed = compile_model(src, "wn_test", &pal).unwrap();
+    // On the main axis-aligned faces of the beveled box (first 12 tris), vertex normals should stay >0.999 flat!
+    for (ti, t) in parsed.mesh.tris.iter().take(12).enumerate() {
+        for vn in [t.na, t.nb, t.nc] {
+            let d = vn.dot(t.face_normal);
+            assert!(
+                d > 0.999,
+                "box main face tri {ti} pillowed under wn=1: dot={d:.5} vn={vn:?} fn={:?}",
+                t.face_normal
+            );
+        }
+    }
+    // On the bevel edge quads (tris 12..36), vertex normals should smoothly span between orthogonal faces!
+    let mut curved_bevels = 0;
+    for t in parsed.mesh.tris.iter().skip(12).take(24) {
+        if t.na.dot(t.nb) < 0.85 || t.nb.dot(t.nc) < 0.85 || t.nc.dot(t.na) < 0.85 {
+            curved_bevels += 1;
+        }
+    }
+    assert!(curved_bevels >= 12, "expected beveled edges to smoothly interpolate normals, got {curved_bevels}");
+
+    let (glb, _) = export_glb(&parsed.mesh, &pal, "wn_test", None).unwrap();
+    let rep = validate_glb_bytes(&glb).unwrap();
+    assert!(rep.is_ok(), "wn=1 GLB errors: {:?}", rep.errors);
 }

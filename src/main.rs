@@ -1,10 +1,11 @@
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use dullahan_artisan::common::math::parse_hex_rgba;
 use dullahan_artisan::mesh::gltf::{export_glb, export_gltf_json};
 use dullahan_artisan::mesh::palette::Palette;
-use dullahan_artisan::mesh::parser::load_and_compile_model;
+use dullahan_artisan::mesh::parser::load_and_compile_model_with_overrides;
 use dullahan_artisan::mesh::render::{render_to_png, render_turntable_png, RenderOptions};
 use dullahan_artisan::mesh::validator::{validate_file as validate_gltf_file, validate_glb_bytes, validate_gltf_json_str};
 use dullahan_artisan::sfx::diagnostics::{analyze_wav, render_diagnostic_png};
@@ -133,6 +134,7 @@ fn cmd_mesh(args: &[String]) -> Result<(), String> {
     let mut turn_out: Option<PathBuf> = None;
     let mut focus_id: Option<String> = None;
     let mut hud_override: Option<bool> = None;
+    let mut cli_overrides: HashMap<String, String> = HashMap::new();
     let mut opts = RenderOptions::default();
 
     let mut i = 0;
@@ -153,6 +155,23 @@ fn cmd_mesh(args: &[String]) -> Result<(), String> {
             "--ext-pal" => {
                 i += 1;
                 ext_pal = Some(args.get(i).ok_or("--ext-pal requires URI prefix")?.clone());
+            }
+            "--ov" | "--override" => {
+                i += 1;
+                let spec = args.get(i).ok_or("--ov requires old:new[,old2:new2]")?;
+                for pair in spec.split(',') {
+                    let pair = pair.trim();
+                    if pair.is_empty() {
+                        continue;
+                    }
+                    let (old_m, new_m) = pair
+                        .split_once(':')
+                        .ok_or_else(|| format!("invalid --ov pair '{pair}' (expected old:new)"))?;
+                    if old_m.trim().is_empty() || new_m.trim().is_empty() {
+                        return Err(format!("invalid --ov pair '{pair}' (expected old:new)"));
+                    }
+                    cli_overrides.insert(old_m.trim().to_string(), new_m.trim().to_string());
+                }
             }
             "--render" => {
                 i += 1;
@@ -209,7 +228,8 @@ fn cmd_mesh(args: &[String]) -> Result<(), String> {
     }
 
     let in_path = input.ok_or("mesh requires <file.mdl>")?;
-    let (parsed, palette, _pal_path) = load_and_compile_model(&in_path, pal_override.as_deref())?;
+    let (parsed, palette, _pal_path) =
+        load_and_compile_model_with_overrides(&in_path, pal_override.as_deref(), &cli_overrides)?;
 
     if let Some(ref fid) = focus_id {
         if let Some(&bb) = parsed.mesh.part_bounds.get(fid) {
@@ -275,16 +295,22 @@ fn cmd_mesh(args: &[String]) -> Result<(), String> {
 
     let bb = parsed.mesh.compute_bounds();
     let sz = if bb.is_valid() { bb.size() } else { dullahan_artisan::common::math::Vec3::ZERO };
+    let total_tris = parsed.mesh.total_visual_tris();
+    let node_info = if parsed.mesh.nodes.is_empty() {
+        String::new()
+    } else {
+        format!(" nodes={}", parsed.mesh.nodes.len())
+    };
     let col_info = if parsed.mesh.colliders.is_empty() {
         String::new()
     } else {
         format!(" cols={}", parsed.mesh.colliders.len())
     };
     println!(
-        "OK mesh {} tris={} verts={} draws={} bbox=[{:.2}x{:.2}x{:.2}] y=[{:.2}..{:.2}] parts={}{}{}",
+        "OK mesh {} tris={} verts={} draws={} bbox=[{:.2}x{:.2}x{:.2}] y=[{:.2}..{:.2}] parts={}{}{}{}",
         parsed.name,
-        parsed.mesh.tris.len(),
-        parsed.mesh.tris.len() * 3,
+        total_tris,
+        total_tris * 3,
         draws,
         sz.x,
         sz.y,
@@ -292,6 +318,7 @@ fn cmd_mesh(args: &[String]) -> Result<(), String> {
         if bb.is_valid() { bb.min.y } else { 0.0 },
         if bb.is_valid() { bb.max.y } else { 0.0 },
         parsed.part_count,
+        node_info,
         col_info,
         export_info
     );
@@ -918,7 +945,7 @@ fn print_usage() {
 USAGE:
   artisan pal <file.pal> [-o <prefix>] [--sheet <png>]
   artisan mesh <file.mdl> [-p <pal>] [-o <out.glb|.gltf>] [--ext-pal <prefix>]
-               [--render <png>] [--turn <png>] [--focus <id>]
+               [--ov old:new[,old2:new2]] [--render <png>] [--turn <png>] [--focus <id>]
                [--size WxH] [--yaw D] [--pitch D] [--fov D] [--fill F]
                [--bg #hex] [--ortho] [--wire] [--colliders] [--hud 0|1]
   artisan sfx <file.sfx> [-k <kit>] [-o <out.wav>] [--var N]
@@ -955,8 +982,9 @@ Note:   #RRGGBBAA with alpha<FF auto-routes triangles into an optional 2nd BLEND
     if topic == "all" || topic == "mesh" {
         println!(
             r#"=== MESH (.mdl) — Right-handed Y-up (+X right, +Y up, +Z front, Y=0 ground), CCW outward ===
-Directives: pal <rel.pal> | $var = <expr> (+ - * / ^ sin cos tan sind cosd atan2 atan2d sqrt abs min max pi)
+Directives: pal <rel.pal> | inc <rel.mdl> (or use <rel.mdl>) | $var = <expr> (+ - * / ^ sin cos tan sind cosd atan2 atan2d sqrt abs min max pi)
 Blocks:     def <name> ... end | grp [@id] [mat] [x,y,z] [flags...] ... end
+ChildNodes: node <name> [x,y,z] [r=rx,ry,rz] [s=sx,sy,sz] [m=...] ... end  (named glTF child mesh w/ local pivot!)
 Colliders:  col <node_name> [x,y,z] [flags...] ... end   (exports separate child glTF node; mat optional inside)
 Booleans:   csg [@id] [mat] [x,y,z] [flags...] ... end   (exact BSP mesh ops: add/sub/int <prim|use|grp>)
 Metaballs:  sdf [@id] [mat] [x,y,z] [res=28] [sm=1] ... end   (Surface-Nets organic sculpting)
@@ -978,11 +1006,14 @@ Primitives (1 line each):
   tub [@id] <mat> <x,y,z> <r|r0,r1> <x:y:z,.> [seg=8] [cap=1]
   lof [@id] <mat> <x,y,z> <x:y:z/rx:ry[/tw][/mat],...> [seg=10] [ph=0] [cap=1]
   ter [@id] <mat> <x,y,z> <sx,sz>             [sub=8,8] [jit=.08] [mnd=0] [pin=1] [thk=0] [seed=1] [mats=...] [fc=...]
-  tri [@id] <mat> <x0:y0:z0> <x1:y1:z1> <x2:y2:z2>
+  tri [@id] <mat> <x0:y0:z0> <x1:y1:z1> <x2:y2:z2> [ds=0|1] [off=.001] [fc=...]
+  rib [@id] <mat> <x,y,z> <w0,w1,h[,curve]>   [seg=4] [ds=1] [off=.001] [fc=...]   (curved tapered blade/ribbon)
 Universal flags:
-  r=rx,ry,rz  s=u|sx,sy,sz  a=c|b|t|o (default c for centered, o for pri/lat/tub/lof/ter)
-  m=x|y|z|xz  sm=0|1 (smooth normals)  bend=deg:along[:toward]  twist=deg:axis
-  rep=N:dx,dy,dz[:rx,ry,rz]  rad=N:R[:axis][:startDeg]  fc=t:m,b:m,s:m,f:m,k:m,l:m,r:m,sl:m
+  r=rx,ry,rz  s=u|sx,sy,sz  a=c|b|t|o (default c for centered, b for rib, o for pri/lat/tub/lof/ter)
+  m=x|y|z|xz  sm=0|1|w (crease-aware smooth)  wn=1|2..12 (face-weighted normals for crisp 1-seg bevels!)
+  bend=deg:along[:toward]  twist=deg:axis  rep=N:dx,dy,dz[:rx,ry,rz]  rad=N:R[:axis][:startDeg]
+  fc=t:m,b:m,s:m,f:m,k:m,l:m,r:m,sl:m
+CLI flags:  --ov old:new[,old2:new2] (repeatable atomic palette swatch swap)  --ext-pal <prefix>
 "#
         );
     }
@@ -991,10 +1022,10 @@ Universal flags:
             r#"=== SFX (.sfx / .kit) — Left-to-right pipe DSP & sequencer ===
 Header: sfx <name> [dur=1 | bpm=120 bars=2 bpb=4] [sr=44100] [ch=2] [loop=0|1] [xfade=.02] [curve=lin|eqp] [norm=-1] [seed=1]
 Kit/Vars: use <rel.kit> | $var = <expr> | def <voice> ... end | grp [flags] [| fx...] ... end | bus | <fx...>
-Generators (+ common flags: g= pan= t= tb= dur= env=a,d,s,r|t:v,... penv=v0>v1:dt cenv=v0>v1:dt lfo=tgt:hz:dep[:wav][:ph] cl=0|1 flt=m:fc:q):
-  osc <sin|tri|saw|sqr|pls> <hz|note> [pwm=.5]
+Generators (+ common flags: g= pan= t= tb= dur= env=a,d,s,r|t:v,... penv=v0>v1:dt[:exp|lin|log|sm]|t0:v0,t1:v1,... cenv=... lfo=tgt:hz:dep[:wav][:ph] cl=0|1 flt=m:fc:q):
+  osc <sin|tri|saw|sqr|pls> <hz|note> [pwm=.5] [ph=0..1]
   ssaw <hz|note> [w=saw] [v=5] [det=12] [spr=.8]
-  fm <hz|note> [mr=2] [mi=2.5] [md=sec]
+  fm <hz|note> [mr=2] [mi=2.5] [md=sec] [ph=0..1]
   mod <hz|note> p=<r:amp[:dec],...> [abs=0|1]
   plk <hz|note> [damp=.992] [br=.65]
   noi <white|pink|brown|crackle> [dens=40] [st=1]

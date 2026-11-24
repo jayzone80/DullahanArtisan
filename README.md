@@ -27,12 +27,17 @@ python3 -m http.server 8765 --directory docs/demo
 ## Showcase (100% Compiled from Plaintext DSL)
 
 ### 3D Game Assets (`.mdl` → `.glb` / `.gltf`)
-All four packs below share a single **2.9 KB** 3-map PBR palette atlas ([`examples/palette.pal`](examples/palette.pal)) and pass strict glTF 2.0 binary & outward-normal validation:
+All showcase packs below share a single **2.9 KB** 3-map PBR palette atlas ([`examples/palette.pal`](examples/palette.pal)) and pass strict glTF 2.0 binary & outward-normal validation:
 
 | Off-Road 4×4 Vehicle (2 draws, translucent interior) | Red Fox on Carved Stones (1 draw, SDF metaballs + BSP CSG) |
 | :---: | :---: |
 | ![Off-Road 4x4](docs/showcase/offroad_4x4.png) | ![Red Fox on Carved Stones](docs/showcase/fox_on_stones.png) |
 | [`offroad_4x4.mdl`](examples/models/offroad_4x4.mdl) | [`fox_on_stones.mdl`](examples/models/fox_on_stones.mdl) |
+
+| Machinist's Workbench & Tools (`wn=1` bevels, CSG, 2 child nodes) | Face-Weighted Normals (`sm=0` vs `sm=1` vs `wn=1`) |
+| :---: | :---: |
+| ![Machinist Workbench and Tools](docs/showcase/workbench_tools.png) | ![Face-Weighted Normals Comparison](docs/showcase/weighted_normals_compare.png) |
+| [`workbench_tools.mdl`](examples/models/workbench_tools.mdl) | Single-segment `bev=` + `wn=1` (zero normal maps) |
 
 | Modular Dungeon Kit (6 snap tiles, 1 draw call) | Weapon & Pickup Props (1 draw call) |
 | :---: | :---: |
@@ -84,8 +89,8 @@ Macro layout stamps (`island`, `ridge`, `peak`, `plateau`, `valley`, `crater`, o
 ## Why Dullahan Artisan?
 
 - **Headless & Instant**: Single **~1.4 MB** static binary compiled from zero-dependency Rust (`std` only) — builds and runs natively on **Linux, macOS, and Windows** with millisecond startup.
-- **Built for LLMs (No MCP Required)**: Compact line-oriented syntax with short opcodes, `$var` math expressions, semantic material/voice names, `@id` part tags (`--focus <id>` zoom inspection), and `def`/`use`/`m=`/`rep=`/`rad=` composition — easy to read, diff, and patch directly via standard shell & file tools.
-- **Game-Engine Friendly**: Every opaque 3D model batches matte, metallic, and emissive surfaces into **1 single PBR draw call** using standard glTF 2.0 / Godot 4 / UE5 / Unity `BaseColor` + `ORM` + `Emissive` atlases (embed by default or share externally via `--ext-pal`), supports separate named collider child nodes (`col <name> ... end` for Godot `-colonly`/`-convcolonly` and Unreal `UBX_`/`UCX_`), and applies transparent edge alpha-bleed on SVG UI exports for crisp GPU bilinear filtering.
+- **Built for LLMs (No MCP Required)**: Compact line-oriented syntax with short opcodes, `$var` math expressions, semantic material/voice names, `@id` part tags (`--focus <id>` zoom inspection), shared 3D/audio kits (`use ../kit.mdl` / `use ../kit.kit`), CLI colorway overrides (`--ov old:new`), and `def`/`use`/`m=`/`rep=`/`rad=` composition — easy to read, diff, and patch directly via standard shell & file tools.
+- **Game-Engine Friendly**: Every opaque 3D model batches matte, metallic, and emissive surfaces into **1 single PBR draw call** using standard glTF 2.0 / Godot 4 / UE5 / Unity `BaseColor` + `ORM` + `Emissive` atlases (embed by default or share externally via `--ext-pal`), supports **Face-Weighted Normals (`wn=1`)** for razor-sharp 1-segment bevel specular highlights with zero normal maps, named **animated child nodes** (`node <name> x,y,z ... end` with local pivots), separate **collider nodes** (`col <name> ... end` for Godot `-colonly`/`-convcolonly` and Unreal `UBX_`/`UCX_`), double-sided foliage (`tri ds=1`, curved `rib`), and transparent edge alpha-bleed on SVG UI exports.
 - **Closed-Loop QA Built In**:
   - **3D**: Multi-threaded 2×2 SSAA PBR software renderer with backface culling, PCF shadows, 2×2 turnarounds with grid/axis HUD, `--focus <id>` close-ups, and strict GLB/glTF validator (including per-triangle outward normal checks).
   - **Audio**: Quantitative CLI telemetry (`peak`, `RMS`, `DC`, `clip`, `seam Δ`, 6-band balance) + 5-panel Magma spectrogram & ±25 ms loop-seam zoom PNG.
@@ -141,6 +146,7 @@ artisan pal examples/palette.pal -o out/palette --sheet out/palette_sheet.png
 # Compile .mdl -> validated .glb (or .gltf) + PBR hero, turnaround & focused zoom renders
 artisan mesh examples/models/offroad_4x4.mdl -o out/offroad_4x4.glb --render out/offroad_4x4.png --turn out/offroad_4x4_turn.png --yaw 35 --pitch 20
 artisan mesh examples/models/fox_on_stones.mdl -o out/fox_on_stones.glb --render out/fox_on_stones.png --turn out/fox_on_stones_turn.png --yaw 32 --pitch 18
+artisan mesh examples/models/workbench_tools.mdl -o out/workbench_tools.glb --ov red_paint:slate_blue --render out/workbench_blue.png --yaw 24 --pitch 24
 artisan mesh examples/models/modular_dungeon_kit.mdl -o out/modular_dungeon_kit.glb --render out/dungeon.png --turn out/dungeon_turn.png --yaw 28 --pitch 26
 artisan mesh examples/models/props_shotgun_medkit.mdl --focus medkit --render out/medkit_zoom.png
 

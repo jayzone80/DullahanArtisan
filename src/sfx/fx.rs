@@ -419,8 +419,9 @@ pub fn master_limit_and_normalize(buf: &mut AudioBuffer, target_peak_db: f64, no
             buf.left[i] *= g;
             buf.right[i] *= g;
         }
+        return;
     }
-    // Gentle soft-knee safety ceiling at 0.985 so nothing ever clips PCM16
+    // Gentle soft-knee safety ceiling at 0.985 for un-normalized mixes so nothing ever clips PCM16
     let ceil = 0.985;
     let knee = 0.88;
     let limit = |x: f64| -> f64 {

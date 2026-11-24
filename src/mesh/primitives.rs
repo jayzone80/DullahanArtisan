@@ -910,6 +910,85 @@ pub fn build_noisy_plane(
     m
 }
 
+/// Tapered curved ribbon / foliage blade rising along +Y from `y=0..h`, curving toward +Z by `curve`.
+/// When `double_sided` is true, emits front and reversed back faces separated by `±offset` along the
+/// local blade normal to satisfy backface culling with zero Z-fighting.
+pub fn build_ribbon(
+    w0: f32,
+    w1: f32,
+    height: f32,
+    curve: f32,
+    segments: u32,
+    double_sided: bool,
+    offset: f32,
+    mat: ResolvedMat,
+    fc: &FaceMats,
+) -> Mesh {
+    let mut m = Mesh::new();
+    let seg = segments.max(1) as usize;
+    let h = height.abs();
+    let hw0 = w0.abs() * 0.5;
+    let hw1 = w1.abs() * 0.5;
+    if h < 1e-6 || (hw0 < 1e-6 && hw1 < 1e-6) {
+        return m;
+    }
+    let m_front = fc.pick(mat, &["f", "front", "t", "top"]);
+    let m_back = fc.pick(mat, &["k", "back", "b", "bot", "bottom"]);
+    let off = if double_sided { offset.abs().max(1e-4) } else { 0.0 };
+
+    // Spine along Y in [0, h] with quadratic forward droop z(u) = curve * u^2
+    let mut left_f = Vec::with_capacity(seg + 1);
+    let mut right_f = Vec::with_capacity(seg + 1);
+    let mut left_b = Vec::with_capacity(seg + 1);
+    let mut right_b = Vec::with_capacity(seg + 1);
+    let mut half_w = Vec::with_capacity(seg + 1);
+
+    for i in 0..=seg {
+        let u = i as f32 / seg as f32;
+        let y = h * u;
+        let z = curve * u * u;
+        let hw = hw0 + (hw1 - hw0) * u;
+        // Tangent along spine is (0, h, 2*curve*u); front normal (right=+X, up=tangent) = tangent × X = (0, 2*curve*u, -h)?
+        // Wait: at u=0 (flat vertical ribbon), front face faces +Z: (right - left) = +X, (top - bot) = +Y => X × Y = +Z!
+        // So normal = X × tangent = (0, -dz/du, dy/du) = (0, -2*curve*u, h) normalized!
+        let n = Vec3::new(0.0, -2.0 * curve * u, h).normalized();
+        let shift_f = n * off;
+        let shift_b = -shift_f;
+        left_f.push(Vec3::new(-hw, y, z) + shift_f);
+        right_f.push(Vec3::new(hw, y, z) + shift_f);
+        left_b.push(Vec3::new(-hw, y, z) + shift_b);
+        right_b.push(Vec3::new(hw, y, z) + shift_b);
+        half_w.push(hw);
+    }
+
+    for i in 0..seg {
+        let w_bot = half_w[i];
+        let w_top = half_w[i + 1];
+        if w_top < 1e-5 && w_bot >= 1e-5 {
+            // Pointed tip triangle
+            let tip_f = (left_f[i + 1] + right_f[i + 1]) * 0.5;
+            m.add_tri(left_f[i], right_f[i], tip_f, m_front);
+            if double_sided {
+                let tip_b = (left_b[i + 1] + right_b[i + 1]) * 0.5;
+                m.add_tri(right_b[i], left_b[i], tip_b, m_back);
+            }
+        } else if w_bot < 1e-5 && w_top >= 1e-5 {
+            let tip_f = (left_f[i] + right_f[i]) * 0.5;
+            m.add_tri(tip_f, right_f[i + 1], left_f[i + 1], m_front);
+            if double_sided {
+                let tip_b = (left_b[i] + right_b[i]) * 0.5;
+                m.add_tri(tip_b, left_b[i + 1], right_b[i + 1], m_back);
+            }
+        } else if w_bot >= 1e-5 && w_top >= 1e-5 {
+            m.add_quad(left_f[i], right_f[i], right_f[i + 1], left_f[i + 1], m_front);
+            if double_sided {
+                m.add_quad(right_b[i], left_b[i], left_b[i + 1], right_b[i + 1], m_back);
+            }
+        }
+    }
+    m
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

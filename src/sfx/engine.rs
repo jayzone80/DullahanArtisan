@@ -110,6 +110,24 @@ pub fn render_sound(
         mix
     };
 
+    // Collapse mono buffers BEFORE peak normalization so on-disk WAV peaks match norm= exactly
+    if final_buf.channels == 1 {
+        for i in 0..final_buf.len() {
+            let m = 0.5 * (final_buf.left[i] + final_buf.right[i]);
+            final_buf.left[i] = m;
+            final_buf.right[i] = m;
+        }
+    }
+    // Subtract constant residual DC mean (preserves loop seam continuity with zero IIR startup transient!)
+    let n_final = final_buf.len();
+    if n_final > 0 {
+        let mean_l = final_buf.left.iter().sum::<f64>() / n_final as f64;
+        let mean_r = final_buf.right.iter().sum::<f64>() / n_final as f64;
+        for i in 0..n_final {
+            final_buf.left[i] -= mean_l;
+            final_buf.right[i] -= mean_r;
+        }
+    }
     master_limit_and_normalize(&mut final_buf, doc.norm_db, doc.normalize);
     Ok(final_buf)
 }
@@ -530,9 +548,10 @@ fn synth_leaf(buf: &mut AudioBuffer, n: usize, dur: f64, layer: &Layer, ctx: Ren
             wave,
             freq,
             pwm,
+            phase: init_phase,
             cycle_lock,
         } => {
-            let mut phase = 0.0;
+            let mut phase = init_phase.rem_euclid(1.0);
             let base_f = if *cycle_lock {
                 if let Some(ld) = ctx.loop_dur {
                     snap_cycle_locked_hz(*freq * ctx.pitch_ratio, ld)
@@ -610,8 +629,9 @@ fn synth_leaf(buf: &mut AudioBuffer, n: usize, dur: f64, layer: &Layer, ctx: Ren
             mod_ratio,
             mod_index,
             mod_decay,
+            phase: init_phase,
         } => {
-            let mut c_ph = 0.0;
+            let mut c_ph = init_phase.rem_euclid(1.0);
             let mut m_ph = 0.0;
             let base_f = *freq * ctx.pitch_ratio;
             for i in 0..n {

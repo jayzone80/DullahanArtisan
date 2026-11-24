@@ -22,6 +22,15 @@ pub struct ColliderMesh {
     pub tris: Vec<Triangle>,
 }
 
+#[derive(Debug, Clone)]
+pub struct ChildNodeMesh {
+    pub name: String,
+    pub translation: Vec3,
+    pub rotation_deg: Vec3,
+    pub scale: Vec3,
+    pub tris: Vec<Triangle>,
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct Mesh {
     pub tris: Vec<Triangle>,
@@ -29,6 +38,8 @@ pub struct Mesh {
     pub part_bounds: HashMap<String, Aabb>,
     /// Optional separate collider sub-meshes exported as named child glTF nodes (e.g. `hull-convcolonly`, `UBX_crate_01`).
     pub colliders: Vec<ColliderMesh>,
+    /// Optional named visual child nodes with local pivots for animated sub-parts (e.g. `LeverPivot`, `TargetMast`).
+    pub nodes: Vec<ChildNodeMesh>,
 }
 
 impl Mesh {
@@ -69,7 +80,42 @@ impl Mesh {
             bb.expand(t.b);
             bb.expand(t.c);
         }
+        for node in &self.nodes {
+            let mat = Mat4::from_trs(node.translation, node.rotation_deg, node.scale);
+            for t in &node.tris {
+                bb.expand(mat.transform_point(t.a));
+                bb.expand(mat.transform_point(t.b));
+                bb.expand(mat.transform_point(t.c));
+            }
+        }
         bb
+    }
+
+    /// Total visual triangle count across root mesh and all named visual child nodes.
+    pub fn total_visual_tris(&self) -> usize {
+        self.tris.len() + self.nodes.iter().map(|n| n.tris.len()).sum::<usize>()
+    }
+
+    /// Flatten root geometry + all transformed visual child nodes into a single mesh (for software rendering).
+    pub fn flattened_visual(&self) -> Mesh {
+        if self.nodes.is_empty() {
+            return self.clone();
+        }
+        let mut out = Mesh {
+            tris: self.tris.clone(),
+            part_bounds: self.part_bounds.clone(),
+            colliders: self.colliders.clone(),
+            nodes: Vec::new(),
+        };
+        for node in &self.nodes {
+            let sub = Mesh {
+                tris: node.tris.clone(),
+                ..Mesh::default()
+            };
+            let mat = Mat4::from_trs(node.translation, node.rotation_deg, node.scale);
+            out.append_transformed(&sub, mat, Some(&node.name));
+        }
+        out
     }
 
     pub fn translate(&mut self, delta: Vec3) {
@@ -80,9 +126,11 @@ impl Mesh {
         }
     }
 
-    /// Apply area-weighted smooth vertex normals across shared positions within this local shape
-    /// (preserving sharp seams across different palette cells / UVs).
+    /// Apply crease-angle-aware, area-weighted smooth vertex normals across shared positions within this local shape.
+    /// Preserves sharp seams across different palette cells/UVs and across creases sharper than ~75.5 deg (`cos < 0.25`),
+    /// which keeps flat cylinder caps crisp and mathematically prevents inverted vertex normals on beveled frustums.
     pub fn compute_smooth_normals(&mut self) {
+        const COS_CREASE: f32 = 0.25; // ~75.5 deg: smooths seg>=5 cyls & 45 deg bevels, keeps 90+ deg caps/creases crisp
         let quant = |p: Vec3, uv: Vec2| -> (i32, i32, i32, i32, i32) {
             (
                 (p.x * 10000.0).round() as i32,
@@ -92,25 +140,147 @@ impl Mesh {
                 (uv.y * 10000.0).round() as i32,
             )
         };
-        let mut accum: HashMap<(i32, i32, i32, i32, i32), Vec3> = HashMap::new();
+        let mut buckets: HashMap<(i32, i32, i32, i32, i32), Vec<(Vec3, Vec3)>> = HashMap::new();
         for t in &self.tris {
             let weighted = (t.b - t.a).cross(t.c - t.a); // magnitude = 2 * area
+            let fn_u = weighted.normalized();
+            if fn_u.len_sq() < 0.5 {
+                continue;
+            }
             for p in [t.a, t.b, t.c] {
-                let k = quant(p, t.uv);
-                let e = accum.entry(k).or_insert(Vec3::ZERO);
-                *e = *e + weighted;
+                buckets.entry(quant(p, t.uv)).or_default().push((weighted, fn_u));
             }
         }
         for t in &mut self.tris {
-            let ka = quant(t.a, t.uv);
-            let kb = quant(t.b, t.uv);
-            let kc = quant(t.c, t.uv);
-            let na = accum.get(&ka).copied().unwrap_or(t.face_normal).normalized();
-            let nb = accum.get(&kb).copied().unwrap_or(t.face_normal).normalized();
-            let nc = accum.get(&kc).copied().unwrap_or(t.face_normal).normalized();
-            t.na = if na.len_sq() > 0.5 { na } else { t.face_normal };
-            t.nb = if nb.len_sq() > 0.5 { nb } else { t.face_normal };
-            t.nc = if nc.len_sq() > 0.5 { nc } else { t.face_normal };
+            let fn_u = (t.b - t.a).cross(t.c - t.a).normalized();
+            let face_n = if fn_u.len_sq() > 0.5 { fn_u } else { t.face_normal };
+            t.face_normal = face_n;
+
+            let smooth_at = |p: Vec3| -> Vec3 {
+                let k = quant(p, t.uv);
+                let mut sum = Vec3::ZERO;
+                if let Some(entries) = buckets.get(&k) {
+                    for &(w, n_other) in entries {
+                        if n_other.dot(face_n) >= COS_CREASE {
+                            sum = sum + w;
+                        }
+                    }
+                }
+                let n = sum.normalized();
+                if n.len_sq() > 0.5 && n.dot(face_n) > 0.0 {
+                    n
+                } else {
+                    face_n
+                }
+            };
+
+            t.na = smooth_at(t.a);
+            t.nb = smooth_at(t.b);
+            t.nc = smooth_at(t.c);
+        }
+    }
+
+    /// Apply Blender-style Face-Weighted Normals (`wn=1`, default `area_power = 4.0`).
+    /// Computes each coplanar polygon face's true total area (eliminating quad-diagonal and ear-clipping bias),
+    /// weights each face plane by `face_area^area_power`, and respects the ~75.5 deg crease threshold so
+    /// large flat panels stay dead-flat while 1-segment bevels interpolate smoothly with zero inverted normals.
+    pub fn compute_weighted_normals(&mut self, area_power: f32) {
+        const COS_CREASE: f32 = 0.25;
+        let power = area_power.clamp(1.0, 12.0);
+
+        let quant_v = |p: Vec3, uv: Vec2| -> (i32, i32, i32, i32, i32) {
+            (
+                (p.x * 10000.0).round() as i32,
+                (p.y * 10000.0).round() as i32,
+                (p.z * 10000.0).round() as i32,
+                (uv.x * 10000.0).round() as i32,
+                (uv.y * 10000.0).round() as i32,
+            )
+        };
+        let quant_plane = |n: Vec3, p: Vec3, uv: Vec2| -> (i32, i32, i32, i32, i32, i32) {
+            let d = n.dot(p);
+            (
+                (n.x * 500.0).round() as i32,
+                (n.y * 500.0).round() as i32,
+                (n.z * 500.0).round() as i32,
+                (d * 1000.0).round() as i32,
+                (uv.x * 10000.0).round() as i32,
+                (uv.y * 10000.0).round() as i32,
+            )
+        };
+
+        // Pass 1: Total polygon area per coplanar face plane (so quad diagonals never bias corners)
+        let mut plane_areas: HashMap<(i32, i32, i32, i32, i32, i32), f32> = HashMap::new();
+        let mut tri_planes = Vec::with_capacity(self.tris.len());
+        for t in &self.tris {
+            let cross = (t.b - t.a).cross(t.c - t.a);
+            let area = cross.len() * 0.5;
+            let fn_u = cross.normalized();
+            if area < 1e-10 || fn_u.len_sq() < 0.5 {
+                tri_planes.push(None);
+                continue;
+            }
+            let pk = quant_plane(fn_u, t.a, t.uv);
+            *plane_areas.entry(pk).or_insert(0.0) += area;
+            tri_planes.push(Some((pk, fn_u)));
+        }
+
+        // Pass 2: Collect unique face planes touching each vertex (deduped by plane key)
+        let mut v_planes: HashMap<(i32, i32, i32, i32, i32), Vec<((i32, i32, i32, i32, i32, i32), Vec3, f32)>> =
+            HashMap::new();
+        for (ti, t) in self.tris.iter().enumerate() {
+            let Some((pk, fn_u)) = tri_planes[ti] else {
+                continue;
+            };
+            let p_area = plane_areas.get(&pk).copied().unwrap_or(0.0);
+            for p in [t.a, t.b, t.c] {
+                let vk = quant_v(p, t.uv);
+                let list = v_planes.entry(vk).or_default();
+                if !list.iter().any(|&(existing_pk, _, _)| existing_pk == pk) {
+                    list.push((pk, fn_u, p_area));
+                }
+            }
+        }
+
+        // Pass 3: Compute area^power weighted normal per vertex (normalized against max local area to avoid underflow)
+        for (ti, t) in self.tris.iter_mut().enumerate() {
+            let Some((_, face_n)) = tri_planes[ti] else {
+                continue;
+            };
+            t.face_normal = face_n;
+
+            let weighted_at = |p: Vec3| -> Vec3 {
+                let vk = quant_v(p, t.uv);
+                let Some(planes) = v_planes.get(&vk) else {
+                    return face_n;
+                };
+                let mut max_a = 0.0f32;
+                for &(_, n_other, a) in planes {
+                    if n_other.dot(face_n) >= COS_CREASE && a > max_a {
+                        max_a = a;
+                    }
+                }
+                if max_a < 1e-12 {
+                    return face_n;
+                }
+                let mut sum = Vec3::ZERO;
+                for &(_, n_other, a) in planes {
+                    if n_other.dot(face_n) >= COS_CREASE {
+                        let w = (a / max_a).powf(power);
+                        sum = sum + n_other * w;
+                    }
+                }
+                let n = sum.normalized();
+                if n.len_sq() > 0.5 && n.dot(face_n) > 0.0 {
+                    n
+                } else {
+                    face_n
+                }
+            };
+
+            t.na = weighted_at(t.a);
+            t.nb = weighted_at(t.b);
+            t.nc = weighted_at(t.c);
         }
     }
 
