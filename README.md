@@ -1,6 +1,6 @@
 # Dullahan Artisan (`artisan`)
 
-> **A headless, single-binary (~1.4 MB) game-asset compiler written in zero-dependency Rust — built specifically for LLMs to author low-poly 3D PBR models, eroded landscapes, shared color-palette atlases, procedural SFX/music, and crisp 2D Game UI SVGs without Blender, Gaea, a DAW, Inkscape, or bloated MCP servers.**
+> **A headless, single-binary (~1.4 MB) game-asset compiler written in zero-dependency Rust — built for LLMs to author low-poly 3D PBR models, eroded landscapes, shared color-palette atlases, procedural SFX/music, and crisp 2D Game UI SVGs directly from plaintext DSLs, with no external tools or MCP servers required.**
 
 Dullahan Artisan replaces fragile GUI and MCP round-trips with a **token-dense, line-oriented plaintext DSL** (`.pal`, `.mdl`, `.ter`, `.sfx`, `.kit`) plus a **zero-dependency Game-UI SVG validator & rasterizer** (`.svg`), compiling directly to validated **`.glb`/`.gltf`** models & QEM-decimated terrain chunks (1 opaque draw call + optional translucent pass & engine collider nodes), **16-bit heightmaps & RGBA biome weightmaps**, **3-map PBR atlases** (`BaseColor`, `ORM`, `Emissive`), **16-bit PCM `.wav`** audio, and **GPU alpha-bled `.png`** UI sprites — complete with built-in software PBR rendering, terrain erosion diagnostics, 5-panel audio spectrograms, and checkerboard/grid/9-slice SVG visual QA previews.
 
@@ -24,7 +24,7 @@ python3 -m http.server 8765 --directory docs/demo
 
 ---
 
-## Showcase (100% Generated from Plaintext DSL — Zero Blender / Zero DAW)
+## Showcase (100% Compiled from Plaintext DSL)
 
 ### 3D Game Assets (`.mdl` → `.glb` / `.gltf`)
 All four packs below share a single **2.9 KB** 3-map PBR palette atlas ([`examples/palette.pal`](examples/palette.pal)) and pass strict glTF 2.0 binary & outward-normal validation:
