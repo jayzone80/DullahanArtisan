@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Dullahan Artisan — Alpine 4×4 Expedition (Three.js Demo)</title>
+  <link rel="stylesheet" href="style.css" />
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://unpkg.com/three@0.170.0/build/three.module.js",
+        "three/addons/": "https://unpkg.com/three@0.170.0/examples/jsm/"
+      }
+    }
+  </script>
+</head>
+<body>
+  <canvas id="game-canvas"></canvas>
+
+  <!-- Loading Overlay -->
+  <div id="loading-screen" class="overlay">
+    <div class="card loading-card">
+      <img src="assets/ui_crest.png" alt="Expedition Crest" class="crest-sm" />
+      <h2>ALPINE 4×4 EXPEDITION</h2>
+      <p id="loading-text">Loading Artisan-compiled assets…</p>
+      <div class="progress-track">
+        <div id="loading-bar" class="progress-fill"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Start Menu -->
+  <div id="start-menu" class="overlay hidden">
+    <div class="card menu-card">
+      <img src="assets/ui_crest.png" alt="Expedition Crest" class="crest" />
+      <h1>ALPINE 4×4 EXPEDITION</h1>
+      <p class="subtitle">Explore a 400×400 m eroded mountain island &amp; collect all 18 gold trail coins.</p>
+      <div class="pill-badge">100% 3D Models, Terrain, Audio &amp; UI Icons Compiled by Dullahan Artisan</div>
+
+      <button id="btn-play" class="btn btn-primary">START EXPEDITION</button>
+
+      <div class="controls-grid">
+        <div><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> / Arrows</div><div>Drive &amp; Steer</div>
+        <div><kbd>Shift</kbd></div><div>Turbo / Low-Gear Climb</div>
+        <div><kbd>Space</kbd></div><div>Handbrake / Drift</div>
+        <div><kbd>H</kbd></div><div>Car Horn</div>
+        <div><kbd>C</kbd></div><div>Camera (Chase / Hood / Orbit)</div>
+        <div><kbd>R</kbd></div><div>Reset 4×4 to Cabin</div>
+        <div><kbd>Esc</kbd> / <kbd>P</kbd></div><div>Pause &amp; Audio Settings</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Pause Menu -->
+  <div id="pause-menu" class="overlay hidden">
+    <div class="card menu-card">
+      <img src="assets/ui_crest.png" alt="Expedition Crest" class="crest-sm" />
+      <h2>EXPEDITION PAUSED</h2>
+
+      <div class="sliders">
+        <label>
+          <span>Music</span>
+          <input id="vol-music" type="range" min="0" max="100" value="35" />
+          <span id="val-music" class="val">35%</span>
+        </label>
+        <label>
+          <span>Ambience</span>
+          <input id="vol-ambience" type="range" min="0" max="100" value="65" />
+          <span id="val-ambience" class="val">65%</span>
+        </label>
+        <label>
+          <span>SFX &amp; Engine</span>
+          <input id="vol-sfx" type="range" min="0" max="100" value="75" />
+          <span id="val-sfx" class="val">75%</span>
+        </label>
+      </div>
+
+      <div class="btn-stack">
+        <button id="btn-resume" class="btn btn-primary">RESUME</button>
+        <button id="btn-reset-car" class="btn btn-secondary">RESET 4×4 TO CABIN (R)</button>
+        <button id="btn-restart" class="btn btn-secondary">RESTART RUN</button>
+      </div>
+
+      <div class="controls-mini">
+        <span><kbd>WASD</kbd> Drive</span>
+        <span><kbd>Shift</kbd> Boost</span>
+        <span><kbd>H</kbd> Horn</span>
+        <span><kbd>C</kbd> Camera</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Victory Overlay -->
+  <div id="victory-menu" class="overlay hidden">
+    <div class="card menu-card">
+      <img src="assets/ui_coin_icon.png" alt="Gold Coin" class="crest-sm" />
+      <h2>ALL 18 COINS COLLECTED!</h2>
+      <p id="victory-stats" class="subtitle">Expedition completed in 00:00.0</p>
+      <div class="btn-stack">
+        <button id="btn-freeroam" class="btn btn-primary">KEEP EXPLORING</button>
+        <button id="btn-play-again" class="btn btn-secondary">PLAY AGAIN</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Active Gameplay HUD -->
+  <div id="hud" class="hidden">
+    <!-- Top-Left: Coins & Timer -->
+    <div class="hud-panel hud-top-left">
+      <div class="coin-row">
+        <img src="assets/ui_coin_icon.png" alt="Coins" class="coin-icon" />
+        <span id="hud-coins" class="hud-big">0 / 18</span>
+      </div>
+      <div class="timer-row">
+        <span class="muted">TIME</span>
+        <span id="hud-timer" class="mono">00:00.0</span>
+      </div>
+    </div>
+
+    <!-- Top-Center: Nearest Coin Compass -->
+    <div class="hud-panel hud-compass">
+      <div class="compass-arrow-wrap">
+        <div id="compass-arrow" class="compass-arrow">▲</div>
+      </div>
+      <div class="compass-info">
+        <span class="muted">NEAREST COIN</span>
+        <span id="hud-dist" class="mono">—</span>
+      </div>
+    </div>
+
+    <!-- Top-Right: Quick Actions -->
+    <div class="hud-panel hud-top-right">
+      <button id="btn-hud-cam" class="hud-chip" title="Cycle Camera (C)">CAM: CHASE</button>
+      <button id="btn-hud-mute" class="hud-chip" title="Toggle Mute (M)">🔊 AUDIO</button>
+      <button id="btn-hud-pause" class="hud-chip" title="Pause (Esc)">⏸ PAUSE</button>
+    </div>
+
+    <!-- Toast Notification -->
+    <div id="toast" class="toast hidden"></div>
+
+    <!-- Bottom-Left: Live Minimap -->
+    <div class="hud-panel hud-minimap">
+      <canvas id="minimap-canvas" width="148" height="148"></canvas>
+      <div class="minimap-label">400×400m · N ↑</div>
+    </div>
+
+    <!-- Bottom-Right: Speedometer & Hints -->
+    <div class="hud-panel hud-speed">
+      <div class="speed-num-row">
+        <span id="hud-speed" class="speed-val">0</span>
+        <span class="speed-unit">KM/H</span>
+      </div>
+      <div class="rpm-track">
+        <div id="hud-rpm" class="rpm-fill"></div>
+      </div>
+      <div class="hud-hints">
+        <span><kbd>WASD</kbd> Drive</span>
+        <span><kbd>Shift</kbd> Boost</span>
+        <span><kbd>H</kbd> Horn</span>
+        <span><kbd>R</kbd> Reset</span>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="main.js"></script>
+</body>
+</html>

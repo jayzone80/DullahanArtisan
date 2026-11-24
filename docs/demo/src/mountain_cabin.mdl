@@ -1,0 +1,68 @@
+pal ../../../examples/palette.pal
+# Cozy Alpine Timber Mountain Cabin (stone foundation, notched logs, pitched roof, glowing windows, porch & chimney)
+$w=6.8  $d=5.4  $fh=.65  $wh=2.55
+
+# Raised stone masonry foundation + front porch steps (deep 2.88m skirt below Y=0 so it never floats on slopes!)
+box @found   stone_mid   0,-1.08,0       $w+.40,3.60,$d+2.0  bev=.04
+box @steps   stone_light 0,.36,$d/2+1.22 2.0,.28,.55         a=b bev=.02
+box @step_lo stone_mid   0,-.52,$d/2+1.62 2.1,1.80,.45       bev=.02
+
+# Porch deck planks + sturdy timber posts seated cleanly into roof rafters + railing
+box @porch   wood_plank  0,$fh+.10,$d/2+.38 $w+.10,.14,1.65  bev=.015
+cyl @p_post  wood_dark   2.9,$fh+.14,$d/2+1.05 .12,.12,2.75  a=b seg=8 m=x
+cyl @p_post2 wood_dark   1.05,$fh+.14,$d/2+1.05 .11,.11,3.70 a=b seg=8 m=x
+box @rail_t  wood_oak    2.0,$fh+1.02,$d/2+1.05 1.95,.09,.09 bev=.01 m=x
+box @rail_b  wood_dark   2.0,$fh+.38,$d/2+1.05  1.95,.07,.07 bev=.01 m=x
+box @rail_s  wood_oak    3.2,$fh+1.02,$d/2+.42  .09,.09,1.25 bev=.01 m=x
+
+# Stacked horizontal timber log walls (crossed corner ends!)
+box @core    wood_dark   0,$fh+$wh/2,-.35   $w-.30,$wh,$d-.30
+cyl @logs_f  wood_oak    0,$fh+.18,$d/2-.55  .19,.19,$w+.45 r=0,0,90 seg=8 rep=7:0,.35,0
+cyl @logs_b  wood_oak    0,$fh+.18,-$d/2-.15 .19,.19,$w+.45 r=0,0,90 seg=8 rep=7:0,.35,0
+cyl @logs_s  wood_light  $w/2-.15,$fh+.35,-.35 .19,.19,$d+.30 r=90,0,0 seg=8 rep=7:0,.35,0 m=x
+
+# Gable end triangular timber walls
+pri @gable_f wood_oak    0,$fh+$wh,$d/2-.40 .24 -$w/2:0,$w/2:0,0:2.25
+pri @gable_b wood_oak    0,$fh+$wh,-$d/2-.15 .24 -$w/2:0,$w/2:0,0:2.25
+
+# Overhanging pitched alpine roof (slate/terracotta dark shingles + timber ridge beam & fascia)
+box @roof_l  slate_blue  -2.05,$fh+$wh+1.02,.10 4.55,.22,$d+2.95 r=0,0,33 bev=.03
+box @roof_r  slate_blue   2.05,$fh+$wh+1.02,.10 4.55,.22,$d+2.95 r=0,0,-33 bev=.03
+box @ridge   wood_dark   0,$fh+$wh+2.28,.10     .34,.28,$d+3.10  bev=.02
+# Snow-dusted trim accent along roof crest
+box @snow_l  roof_cream  -1.80,$fh+$wh+1.26,.10 3.70,.10,$d+2.65 r=0,0,33 bev=.02
+box @snow_r  roof_cream   1.80,$fh+$wh+1.26,.10 3.70,.10,$d+2.65 r=0,0,-33 bev=.02
+
+# Heavy stone chimney rising through the roof
+box @chim_b  stone_dark  2.35,$fh+1.8,-1.35 1.15,3.8,1.15   bev=.04
+box @chim_t  stone_mid   2.35,$fh+4.5,-1.35 .92,2.2,.92     bev=.03
+box @chim_c  stone_light 2.35,$fh+5.65,-1.35 1.12,.18,1.12  bev=.02
+
+# Front timber door + warm glowing windows with wooden shutters & muntins
+box @door_f  wood_dark   0,$fh+1.10,$d/2-.32 1.24,2.15,.14  bev=.015
+box @door    wood_plank  0,$fh+1.08,$d/2-.27 1.04,1.98,.10  bev=.012
+ico @knob    brass_gold  .36,$fh+1.05,$d/2-.20 .06          sub=1
+
+# Front warm glowing windows (mirrored X)
+grp @win_front 1.95,$fh+1.45,$d/2-.32 m=x
+  box wood_dark   0,0,0     1.22,1.12,.14 bev=.015
+  box window_warm 0,0,.04   1.02,.92,.08
+  box wood_dark   0,0,.08   1.04,.07,.04
+  box wood_dark   0,0,.08   .07,.94,.04
+  box wood_light  0,-.58,.08 1.32,.10,.18 bev=.01
+end
+
+# Side windows (mirrored X)
+grp @win_side $w/2+.02,$fh+1.45,-.35 m=x
+  box wood_dark   0,0,0     .14,1.10,1.40 bev=.015
+  box window_warm .04,0,0   .08,.90,1.20
+  box wood_dark   .08,0,0   .04,.07,1.22
+  box wood_dark   .08,0,0   .04,.92,.07
+end
+
+# Cozy porch lantern (emissive beacon!) + stacked firewood pile
+box @lan_arm iron_dark   .86,$fh+2.20,$d/2-.18 .06,.06,.30
+box @lan_top iron_dark   .86,$fh+2.14,$d/2-.04 .22,.08,.22  bev=.01
+box @lan_glw beacon_gold .86,$fh+1.96,$d/2-.04 .16,.28,.16  bev=.01
+cyl @firewd  wood_plank  -2.45,$fh+.20,$d/2+.10 .08,.08,.65 r=90,0,0 seg=6 rep=5:.16,0,0
+cyl @firewd2 wood_light  -2.37,$fh+.34,$d/2+.10 .08,.08,.65 r=90,0,0 seg=6 rep=4:.16,0,0

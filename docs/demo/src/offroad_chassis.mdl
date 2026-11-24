@@ -1,0 +1,112 @@
+pal ../../../examples/palette.pal
+# Stylized Off-Road 4x4 Expedition Chassis (wheels mounted separately at (±0.84, 0.36, 1.08 / -1.04))
+$wr=.36   $ax_f=1.08   $ax_b=-1.04   $trk=.84
+$flr=.42  $belt=1.06   $roof=1.74    $w=1.64
+
+# Spare wheel template (mounted on rear tailgate)
+def wheel
+  lat rubber_dark 0,0,0  .22:-.15,.32:-.15,.36:-.11,.36:.11,.32:.15,.22:.15 seg=12 cap=0 r=0,0,90
+  cyl alloy_light 0,0,0  .225,.225,.22 seg=12 r=0,0,90 bev=.012
+  cyl iron_dark   0,0,0  .17,.17,.24   seg=12 r=0,0,90
+  cyl steel_mid   0,0,0  .09,.09,.28   seg=10 r=0,0,90 bev=.01
+  cyl alloy_light .12,0,0 .018,.018,.04 seg=6 r=0,0,90 rad=5:.13:x
+end
+
+# Underbody chassis, axles & differentials
+box @chassis bumper_dark 0,$flr-.06,0     1.22,.16,3.26  bev=.02
+cyl @axles   iron_dark   0,$wr,$ax_f      .055,.055,1.66 r=0,0,90 seg=8
+cyl @axle_b  iron_dark   0,$wr,$ax_b      .055,.055,1.66 r=0,0,90 seg=8
+box @rocker  bumper_dark $w/2+.02,.46,0   .10,.12,1.38   bev=.015 m=x
+
+# Sculpted side body panels with clean wheel-arch cutouts
+pri @side_l olive_body -$w/2+.07,0,0 .14  -1.66:.48,-1.44:.48,-1.36:.78,-0.72:.78,-0.64:.48,.68:.48,.76:.78,1.40:.78,1.48:.48,1.68:.48,1.68:1.04,-1.66:1.06 bev=.012 r=0,90,0 m=x
+
+# Flared dark wheel-arch fenders (single beveled prism, mirrored X)
+def fender_arch
+  pri bumper_dark 0,0,0 .14  -.48:.48,-.39:.48,-.31:.77,.31:.77,.39:.48,.48:.48,.38:.855,-.38:.855 bev=.012 r=0,90,0
+end
+use @fenders_f fender_arch $w/2+.04,0,$ax_f m=x
+use @fenders_b fender_arch $w/2+.04,0,$ax_b m=x
+
+# Main lower tub floor, firewall, hood & rear tailgate
+box @floor    bumper_dark 0,$flr+.06,-.38  $w-.20,.08,2.45
+box @hood_low olive_body  0,.76,1.12       $w-.12,.58,1.14  bev=.025
+box @hood_top olive_light 0,1.08,1.10      1.18,.11,.94     t=.84,.88 bev=.02
+box @vent     bumper_dark 0,1.14,.86       .36,.04,.24      bev=.008
+box @tailgate olive_body  0,.77,-1.62      $w-.12,.58,.12   bev=.02
+
+# Front grille, headlights, fogs, heavy bumper, winch & tubular bullbar
+box @grille_bg bumper_dark 0,.78,1.68      1.04,.34,.08     bev=.01
+box @grille_sl steel_mid   0,.67,1.72      .94,.035,.04     rep=4:0,.075,0
+cyl @head_ring alloy_light .64,.82,1.68    .13,.13,.07      r=90,0,0 seg=10 m=x
+cyl @head_lens headlight   .64,.82,1.70    .10,.10,.06      r=90,0,0 seg=10 m=x
+cyl @turn_lamp amber_glow  .66,.65,1.70    .055,.055,.05    r=90,0,0 seg=8 m=x
+box @bumper_f  bumper_dark 0,.50,1.80      $w+.16,.18,.22   bev=.02
+box @winch     iron_dark   0,.62,1.79      .44,.14,.16      bev=.015
+box @tow_hook  red_paint   .56,.49,1.91    .10,.10,.08      bev=.01 m=x
+tub @bullbar   bumper_dark 0,0,0  .032  -.52:.56:1.82,-.46:1.00:1.74,.46:1.00:1.74,.52:.56:1.82 seg=8
+tub @bull_mid  bumper_dark 0,0,0  .024  -.49:.78:1.78,.49:.78:1.78 seg=8
+box @bumper_b  bumper_dark 0,.50,-1.76     $w+.10,.16,.16   bev=.02
+box @taillight tail_red    .68,.80,-1.69   .14,.22,.05      bev=.01 m=x
+
+# Interior cabin + dark wheelhouse tubs
+box @wheelwell_b bumper_dark .58,.64,$ax_b .40,.34,.74     m=x
+box @wheelwell_f bumper_dark .58,.64,$ax_f .40,.34,.74     m=x
+box @dash      bumper_dark 0,1.02,.46      $w-.26,.22,.34   bev=.02
+tor @steering  rubber_dark  .36,1.12,.30   .14,.022         r=62,0,0 seg=12 tseg=6
+cyl @steer_col iron_dark    .36,1.06,.38   .025,.025,.24    r=62,0,0 seg=6
+def seat
+  box seat_tan     0,.62,0    .46,.12,.46 bev=.02
+  box seat_tan     0,.96,-.18 .44,.56,.12 r=-10,0,0 bev=.02
+  box leather_dark 0,1.30,-.23 .24,.16,.10 bev=.015
+end
+use @seats_f seat .36,0,-.12 m=x
+box @bench_b   seat_tan    0,.68,-.96      .92,.14,.44      bev=.02
+box @bench_bk  seat_tan    0,.98,-1.14     .92,.52,.12      r=-8,0,0 bev=.02
+
+# Cabin pillars & window frames
+box @pillar_a  olive_body  .74,1.38,.48    .11,.68,.11      r=-14,0,0 bev=.01 m=x
+box @pillar_b  olive_body  .74,1.38,-.26   .11,.68,.12      bev=.01 m=x
+box @pillar_c  olive_body  .74,1.38,-.96   .11,.68,.12      bev=.01 m=x
+box @pillar_d  olive_body  .74,1.38,-1.56  .12,.68,.14      bev=.01 m=x
+box @header_f  olive_body  0,1.69,.38      $w-.08,.10,.12   bev=.01
+box @header_b  olive_body  0,1.69,-1.56    $w-.08,.10,.14   bev=.01
+box @side_hdr  olive_body  .75,1.69,-.58   .10,.10,2.04     bev=.01 m=x
+
+# Translucent tinted glass panes
+box @glass_f   glass_tint  0,1.36,.48      1.44,.68,.03     r=-14,0,0
+box @glass_s   glass_tint  .74,1.36,-.56   .03,.66,1.98     m=x
+box @glass_b   glass_tint  0,1.36,-1.56    1.42,.66,.03
+
+# Door handles, side mirrors & raised snorkel
+box @handle_f  bumper_dark .84,.96,.04     .04,.04,.16      bev=.006 m=x
+box @handle_b  bumper_dark .84,.96,-.66    .04,.04,.16      bev=.006 m=x
+box @mirror_arm bumper_dark .88,1.16,.44   .14,.04,.04      m=x
+box @mirror_hd bumper_dark .96,1.20,.44    .08,.18,.12      bev=.012 m=x
+tub @snorkel   bumper_dark 0,0,0  .042  -.85:.92:.78,-.85:1.12:.62,-.85:1.72:.44,-.85:1.80:.34 seg=8
+
+# Cream overhanging roof + black safari roof rack + rally lights + expedition gear
+box @roof_cap  roof_cream  0,$roof+.08,-.60  $w+.06,.18,2.24  t=.92,.95 bev=.025
+box @rack_side bumper_dark .74,1.94,-.64     .06,.10,1.96     bev=.008 m=x
+box @rack_end  bumper_dark 0,1.94,.32        1.54,.10,.06     bev=.008
+box @rack_bk   bumper_dark 0,1.94,-1.60      1.54,.10,.06     bev=.008
+box @rack_bar  bumper_dark 0,1.90,-1.40      1.48,.04,.06     rep=5:0,0,.38
+
+grp @rally_lights 0,2.05,.34
+  box iron_dark   -.42,-.08,0 .03,.06,.04 rep=4:.28,0,0
+  cyl bumper_dark -.42,0,0    .085,.085,.09 r=90,0,0 seg=10 rep=4:.28,0,0
+  cyl headlight   -.42,0,.04  .068,.068,.04 r=90,0,0 seg=10 rep=4:.28,0,0
+end
+
+# Roof cargo
+box @cargo_box wood_oak    -.12,1.92,-.54    .78,.34,.90      a=b bev=.02
+box @cargo_lid wood_dark   -.12,2.24,-.54    .82,.07,.94      a=b bev=.012
+box @jerrycan  red_paint   .48,1.92,-.06     .24,.40,.34      a=b bev=.018
+cyl @j_cap     bumper_dark .48,2.32,-.02     .04,.04,.06      a=b seg=8
+cyl @bedroll   canvas_cream .42,2.08,-.98    .16,.16,.84      r=90,0,0 seg=12 sm=1
+cyl @strap     wood_dark   .42,2.08,-.98     .168,.168,.06    r=90,0,0 seg=12 rep=2:0,0,.34
+
+# Spare tire + rear ladder
+use @spare     wheel       0,.96,-1.78       r=0,90,0 s=.88
+box @ladder_st iron_dark   -.46,.84,-1.70    .03,.92,.03      rep=2:.28,0,0
+box @ladder_rg iron_dark   -.32,.52,-1.70    .28,.025,.03     rep=4:0,.24,0

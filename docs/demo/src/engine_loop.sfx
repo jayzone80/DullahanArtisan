@@ -1,0 +1,9 @@
+# Seamless 4x4 off-road boxer/diesel engine idle rumble loop (pitch-shifted live by Web Audio playbackRate)
+sfx engine_loop dur=1.2 sr=22050 ch=1 loop=1 xfade=.04 curve=lin norm=-2 seed=11
+# Firing fundamental + warm 2nd & 3rd cylinder harmonics, all cycle-locked for zero-seam wrap
+osc tri 35  dur=1.2 cl=1 lfo=g:7.5:.18:sin g=.68 | flt lp 240 q=.8
+osc saw 70  dur=1.2 cl=1 lfo=g:15.0:.22:sin g=.46 | flt lp 310 q=1.1 | drv 1.4 mix=.45
+osc pls 105 dur=1.2 pwm=.35 cl=1 lfo=g:7.5:.20:tri g=.22 | flt bp 220 q=1.4
+# Mechanical exhaust & tire intake air texture
+noi brown   dur=1.2 lfo=g:15.0:.16:sin g=.28 | flt bp 140 q=1.2
+bus | flt hp 28 | flt lp 780 q=.75

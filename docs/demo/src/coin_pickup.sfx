@@ -1,0 +1,10 @@
+# Bright two-note gold expedition coin pickup chime
+sfx coin_pickup dur=.58 sr=22050 ch=2 norm=-1 seed=7
+# First chime strike (E5)
+osc sin E5 dur=.24 t=0    env=.002,.08,.15,.12 g=.55 pan=-.12
+mod E5     dur=.28 t=0    p=1:1:.16,2.0:.45:.12,3.0:.22:.08 env=.001,.06,.1,.14 g=.42 pan=-.15
+# Second brighter harmonic strike (B5 + octave sparkle)
+osc sin B5 dur=.46 t=.075 env=.002,.12,.12,.28 g=.70 pan=.12
+mod B5     dur=.48 t=.075 p=1:1:.26,2.0:.50:.18,3.0:.25:.12,4.0:.12:.07 env=.001,.08,.1,.26 g=.55 pan=.15
+osc tri E6 dur=.34 t=.09  env=.003,.07,0,.22   g=.24 pan=.05 | flt hp 900
+bus | flt hp 180 | rev room=.42 mix=.18 damp=.35

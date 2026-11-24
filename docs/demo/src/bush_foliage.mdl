@@ -1,0 +1,6 @@
+pal ../../../examples/palette.pal
+# Stylized Low-Poly Alpine Foliage Bush / Fern Cluster
+ico @bush_c grass_mid   0,.36,0     .58 s=1.2,.82,1.15 sub=1 jit=.22 seed=9  mats=grass_mid,grass_dark,grass_light
+ico @bush_l grass_light -.44,.26,.22 .38 s=1.1,.78,1.0 sub=1 jit=.20 seed=14
+ico @bush_r moss_mid     .40,.24,-.20 .36 s=1.0,.75,1.1 sub=1 jit=.18 seed=23
+pyr @fern   grass_light 0,.32,0 .18,.58,.14 r=32,0,0 a=b rad=5:.26:y

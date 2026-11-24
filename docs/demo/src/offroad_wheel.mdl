@@ -1,0 +1,8 @@
+pal ../../../examples/palette.pal
+# Standalone Off-Road Wheel centered at (0,0,0) for independent spinning & front steering in Three.js
+lat @tire   rubber_dark 0,0,0   .22:-.15,.32:-.15,.36:-.11,.36:.11,.32:.15,.22:.15 seg=12 cap=0 r=0,0,90
+cyl @rim    alloy_light 0,0,0   .225,.225,.22 seg=12 r=0,0,90 bev=.012
+cyl @drum   iron_dark   0,0,0   .17,.17,.24   seg=12 r=0,0,90
+cyl @hub    steel_mid   0,0,0   .09,.09,.28   seg=10 r=0,0,90 bev=.01
+cyl @lugs_r alloy_light .12,0,0 .018,.018,.04 seg=6  r=0,0,90 rad=5:.13:x
+cyl @lugs_l alloy_light -.12,0,0 .018,.018,.04 seg=6 r=0,0,90 rad=5:.13:x

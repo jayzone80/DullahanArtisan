@@ -1,0 +1,7 @@
+pal ../../../examples/palette.pal
+# Stylized Alpine Pine Tree (grounded at Y=0, slight subterranean trunk root for hills)
+cyl @trunk  bark_dark  0,-.6,0  .32,.16,3.4  a=b seg=7
+cyl @tier1  pine_dark  0,1.9,0  1.75,.35,2.4 a=b seg=7
+cyl @tier2  pine_mid   0,3.5,0  1.45,.25,2.3 a=b seg=7 r=0,25,0
+cyl @tier3  pine_mid   0,5.0,0  1.12,.15,2.0 a=b seg=7 r=0,50,0
+cyl @tier4  pine_light 0,6.3,0  .78,0,1.7    a=b seg=7 r=0,12,0

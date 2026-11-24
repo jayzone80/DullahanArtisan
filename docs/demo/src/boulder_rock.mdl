@@ -1,0 +1,5 @@
+pal ../../../examples/palette.pal
+# Faceted Alpine Boulder with Moss Cap (grounded cleanly, slight skirt below Y=0 for sloped hillsides)
+ico @rock_main stone_mid   0,.45,0   1.15 s=1.25,.82,1.05 sub=1 jit=.22 seed=17 mats=stone_mid,stone_light,stone_dark
+ico @rock_side stone_dark  .72,.22,.35 .62 s=1.1,.75,.95  sub=1 jit=.20 seed=31
+ico @moss_top  moss_mid    -.08,1.05,-.05 .58 s=1.25,.35,1.1 sub=1 jit=.18 seed=11

@@ -1,0 +1,6 @@
+# Off-road suspension & gravel thump on hard landings / bumps
+sfx bump_thud dur=.32 sr=22050 ch=1 norm=-1 seed=3
+osc sin 118 dur=.14 penv=118>34:.095 env=.002,.08,0,.05 g=.85 | drv 1.5 mix=.4
+noi brown   dur=.18 cenv=680>160:.14 env=.003,.11,0,.06 g=.55 | flt lp 420 q=1.0
+noi pink    dur=.12 cenv=1600>500:.09 env=.004,.07,0,.04 g=.22 | flt bp 950 q=1.2
+bus | flt hp 30

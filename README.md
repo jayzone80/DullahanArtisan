@@ -6,6 +6,24 @@ Dullahan Artisan replaces fragile GUI and MCP round-trips with a **token-dense, 
 
 ---
 
+## Playable Three.js Demo — Alpine 4×4 Expedition
+
+> **[▶ Play Live in Browser](https://jayzone80.github.io/DullahanArtisan/demo/)** *(GitHub Pages)* · **Source & Reproducible Asset Build:** [`docs/demo/`](docs/demo/)
+
+Explore a **400×400 m eroded alpine island** in a split-chassis 4×4 with live suspension, spinning/steering wheels, dust & water splashes, a timber mountain cabin, instanced pine forests, meadow grass & wildflowers, a dual-tone car horn (`H` — try honking near the Red Fox!), procedural engine/ambience/music/coin SFX, live minimap, compass, and Start/Pause menus. **100% of the 3D models, terrain, audio, and UI icons (5.7 MB total) are compiled directly by `artisan`** via [`docs/demo/build_assets.sh`](docs/demo/build_assets.sh).
+
+| Mountain Cabin, 4×4 & Eroded Alpine Peaks | Red Fox Overlook, Wildflowers & Horn Easter Egg |
+| :---: | :---: |
+| ![Alpine 4x4 Expedition Cabin](docs/showcase/demo_cabin.png) | ![Alpine 4x4 Expedition Red Fox Overlook](docs/showcase/demo_fox.png) |
+
+Run locally (zero bundler required):
+```sh
+python3 -m http.server 8765 --directory docs/demo
+# Open http://localhost:8765/
+```
+
+---
+
 ## Showcase (100% Generated from Plaintext DSL — Zero Blender / Zero DAW)
 
 ### 3D Game Assets (`.mdl` → `.glb` / `.gltf`)

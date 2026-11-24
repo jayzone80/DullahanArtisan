@@ -1,0 +1,34 @@
+pal ../../../examples/palette.pal
+# 400x400m Alpine Expedition Trail (drivable rolling valley, flat cabin meadow, scenic ridges & southern cove)
+terrain mountain_trail size=256 world=400,40,400 seed=77 sea=.10
+
+# 1. Macro landmass: broad alpine bowl ringed by northern peaks, gentle southern cove & central meadow
+island   r=.52 falloff=2.4 h=.30
+ridge   -.36:-.36,-.08:-.40,.24:-.34,.40:-.16  w=.28 h=.82 sharp=1.22 op=max
+peak    -.28,-.30  .22 .92 sharp=1.35 op=max
+peak     .26,-.28  .20 .86 sharp=1.32 op=max
+peak    -.34,.18   .18 .56 sharp=1.35 op=max
+peak     .32,.16   .17 .52 sharp=1.35 op=max
+# Flat buildable central meadow for the mountain cabin & starting yard
+plateau  0.0,.02   .11 .30 flat=.74 blend=.94
+# Secondary scenic overlook plateau in the northeast for the Red Fox landmark
+plateau  .20,-.12  .08 .44 flat=.65 blend=.82
+# Gentle winding river valley flowing down from northern pass to southern cove
+valley  -.06:-.26,.06:-.08,.14:.14,.04:.42 w=.10 depth=.16 flat=.32
+crater  -.24,.14   .10 .11 rim=.09
+
+# 2. Procedural geological noise (gentle rolling meadows, craggy high peaks)
+noise warp  oct=5 freq=2.8 amp=.13 mask=high
+noise fbm   oct=4 freq=4.0 amp=.04 mask=low
+noise ridge oct=4 freq=4.5 amp=.09 mask=slope
+
+# 3. Hydraulic droplet erosion (55k drops) + thermal relaxation for natural trails & gullies
+erode drops=55000 inertia=.14 cap=3.8 dep=.25 ero=.28 evap=.02 rad=2 steps=50 thermal=14 talus=.010
+smooth iters=1
+norm
+
+# 4. 4-channel normalized biome weightmap (R=sand/dirt trail, G=grass/forest, B=cliff rock, A=alpine snow)
+splat r sand_warm  h=0..0.18    slope=0..24  w=1.5 sharp=16
+splat g grass_mid  h=0.14..0.64 slope=0..28  w=1.3 sharp=12
+splat b stone_mid  h=0.0..1.0   slope=27..90 w=1.6 sharp=14
+splat a roof_cream h=0.72..1.0  slope=0..60  w=1.7 sharp=15

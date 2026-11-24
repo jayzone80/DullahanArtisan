@@ -1,0 +1,11 @@
+# Classic dual-tone 4x4 off-road horn (F4 349.2Hz + A4 440Hz metallic brassy reed tone)
+sfx car_horn dur=.42 sr=22050 ch=2 norm=-1 seed=23
+# Low horn bell (F4 = 349.2 Hz) with subtle diaphragm pitch scoop at attack
+osc saw 349.2 dur=.38 t=0    penv=334>349.2:.028 env=.014,.04,.82,.07 g=.55 pan=-.18 | flt bp 920 q=1.1 | drv 1.8 mix=.55
+osc pls 349.2 dur=.38 t=.004 pwm=.38             env=.016,.04,.78,.07 g=.34 pan=-.14 | flt lp 2200 q=.9
+# High horn bell (A4 = 440 Hz) slightly offset for authentic dual-klaxon thickness
+osc saw 440   dur=.38 t=.003 penv=424>440:.028   env=.015,.04,.82,.07 g=.52 pan=.18  | flt bp 1180 q=1.1 | drv 1.8 mix=.55
+osc pls 440   dur=.38 t=.006 pwm=.36             env=.016,.04,.78,.07 g=.32 pan=.14  | flt lp 2500 q=.9
+# Subtle electromagnetic relay click & air buzz at onset
+noi pink      dur=.035 t=0                       env=.002,.015,0,.015 g=.18 | flt bp 1800 q=1.6
+bus | flt hp 220 | flt lp 3400 q=.8 | rev room=.28 mix=.12 damp=.45

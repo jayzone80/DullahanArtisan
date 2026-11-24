@@ -1,0 +1,9 @@
+pal ../../../examples/palette.pal
+# Low-poly Alpine Meadow Grass Tuft (7 varied angled blades, grounded slightly below Y=0 for slopes)
+pyr @b1 grass_light  0,-.05,0       .11,.74,.05  r=10,12,8    a=b
+pyr @b2 grass_mid   -.09,-.05,.05   .12,.64,.05  r=22,58,18   a=b
+pyr @b3 grass_dark   .10,-.05,.04   .12,.68,.05  r=18,-48,-22 a=b
+pyr @b4 grass_light  .04,-.05,-.10  .11,.60,.05  r=-24,18,-12 a=b
+pyr @b5 moss_mid    -.08,-.05,-.08  .12,.54,.05  r=-20,-62,24 a=b
+pyr @b6 grass_mid    .09,-.05,-.04  .10,.50,.04  r=-12,-85,-28 a=b
+pyr @b7 grass_dark  -.11,-.05,.01   .10,.48,.04  r=14,96,26   a=b

@@ -1,0 +1,7 @@
+pal ../../../examples/palette.pal
+# Spinning Gold Expedition Coin / Medallion (beveled brass rim + glowing beacon core + star crest)
+cyl @rim   brass_gold  0,1.05,0 .62,.62,.16 seg=16 r=90,0,0 bev=.03
+cyl @core  beacon_gold 0,1.05,0 .46,.46,.19 seg=16 r=90,0,0 bev=.02
+box @star1 brass_gold  0,1.05,0 .38,.38,.23 r=0,0,45 bev=.015
+box @star2 brass_gold  0,1.05,0 .38,.38,.23 bev=.015
+tor @halo  amber_glow  0,1.05,0 .74,.035    seg=20 tseg=6 r=90,0,0

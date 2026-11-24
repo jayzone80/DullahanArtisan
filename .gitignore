@@ -5,3 +5,6 @@
 *.wav
 *.png
 !docs/showcase/*.png
+!docs/demo/assets/*.glb
+!docs/demo/assets/*.png
+!docs/demo/assets/*.wav
