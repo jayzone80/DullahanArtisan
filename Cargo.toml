@@ -2,7 +2,7 @@
 name = "dullahan-artisan"
 version = "0.1.0"
 edition = "2021"
-description = "Dullahan Artisan — headless, LLM-native low-poly 3D PBR and procedural SFX/music asset compiler"
+description = "Dullahan Artisan — headless, zero-dependency LLM-native game-asset compiler for 3D PBR models (CSG/metaballs), eroded terrains, procedural SFX/music, and 2D Game-UI SVGs"
 
 [lib]
 name = "dullahan_artisan"
