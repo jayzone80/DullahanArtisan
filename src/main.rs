@@ -13,6 +13,10 @@ use dullahan_artisan::sfx::parser::load_sound_file;
 use dullahan_artisan::sfx::wav::{read_wav, write_pcm16};
 use dullahan_artisan::svg::parser::load_svg_file;
 use dullahan_artisan::svg::raster::{render_svg_png, SvgRenderOptions};
+use dullahan_artisan::terrain::mesher::{build_terrain_mesh, TerrainMeshOptions};
+use dullahan_artisan::terrain::parser::load_terrain_file;
+use dullahan_artisan::terrain::preview::render_terrain_preview_png;
+use dullahan_artisan::terrain::sim::{build_from_heightmap_png, simulate_terrain};
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -25,9 +29,10 @@ fn main() -> ExitCode {
         "mesh" | "model" => cmd_mesh(&args[1..]),
         "sfx" | "audio" => cmd_sfx(&args[1..]),
         "svg" | "ui" => cmd_svg(&args[1..]),
+        "terrain" | "ter" => cmd_terrain(&args[1..]),
         "validate" | "val" => cmd_validate(&args[1..]),
         "spec" => cmd_spec(&args[1..]),
-        other => Err(format!("unknown subcommand '{other}' (use: pal, mesh, sfx, svg, validate, spec)")),
+        other => Err(format!("unknown subcommand '{other}' (use: pal, mesh, sfx, svg, terrain, validate, spec)")),
     };
     match res {
         Ok(()) => ExitCode::SUCCESS,
@@ -573,6 +578,270 @@ fn cmd_svg(args: &[String]) -> Result<(), String> {
     Ok(())
 }
 
+fn cmd_terrain(args: &[String]) -> Result<(), String> {
+    let mut input_ter: Option<PathBuf> = None;
+    let mut from_hm: Option<PathBuf> = None;
+    let mut weightmap: Option<PathBuf> = None;
+    let mut pal_override: Option<PathBuf> = None;
+    let mut out_prefix: Option<String> = None;
+    let mut preview_png: Option<PathBuf> = None;
+    let mut mesh_out: Option<PathBuf> = None;
+    let mut render_out: Option<PathBuf> = None;
+    let mut turn_out: Option<PathBuf> = None;
+    let mut ext_pal: Option<String> = None;
+    let mut seed_override: Option<u64> = None;
+    let mut world_override: Option<[f32; 3]> = None;
+    let mut mats_override: Option<[String; 4]> = None;
+    let mut mesh_opts = TerrainMeshOptions::default();
+    let mut render_opts = RenderOptions::default();
+    render_opts.yaw_deg = 38.0;
+    render_opts.pitch_deg = 28.0;
+
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
+            "-h" | "--help" => {
+                print_usage();
+                return Ok(());
+            }
+            "--from-heightmap" | "--heightmap" => {
+                i += 1;
+                from_hm = Some(PathBuf::from(args.get(i).ok_or("--from-heightmap requires png path")?));
+            }
+            "--weightmap" | "--splat" => {
+                i += 1;
+                weightmap = Some(PathBuf::from(args.get(i).ok_or("--weightmap requires png path")?));
+            }
+            "-p" | "--pal" | "--palette" => {
+                i += 1;
+                pal_override = Some(PathBuf::from(args.get(i).ok_or("-p requires palette path")?));
+            }
+            "-o" | "--out" => {
+                i += 1;
+                out_prefix = Some(args.get(i).ok_or("-o requires output prefix")?.clone());
+            }
+            "--preview" => {
+                i += 1;
+                preview_png = Some(PathBuf::from(args.get(i).ok_or("--preview requires png path")?));
+            }
+            "--mesh" => {
+                i += 1;
+                mesh_out = Some(PathBuf::from(args.get(i).ok_or("--mesh requires .glb/.gltf path")?));
+            }
+            "--ext-pal" => {
+                i += 1;
+                ext_pal = Some(args.get(i).ok_or("--ext-pal requires URI prefix")?.clone());
+            }
+            "--render" => {
+                i += 1;
+                render_out = Some(PathBuf::from(args.get(i).ok_or("--render requires png path")?));
+            }
+            "--turn" | "--turntable" => {
+                i += 1;
+                turn_out = Some(PathBuf::from(args.get(i).ok_or("--turn requires png path")?));
+            }
+            "--grid" => {
+                i += 1;
+                mesh_opts.grid = args.get(i).ok_or("--grid requires N")?.parse().map_err(|_| "bad --grid")?;
+            }
+            "--tris" => {
+                i += 1;
+                mesh_opts.target_tris = Some(args.get(i).ok_or("--tris requires N")?.parse().map_err(|_| "bad --tris")?);
+            }
+            "--skirt" => {
+                i += 1;
+                let v = args.get(i).ok_or("--skirt requires 0|1")?;
+                mesh_opts.skirt = v != "0" && !v.eq_ignore_ascii_case("false");
+            }
+            "--smooth" => {
+                i += 1;
+                let v = args.get(i).ok_or("--smooth requires 0|1")?;
+                mesh_opts.smooth = v != "0" && !v.eq_ignore_ascii_case("false");
+            }
+            "--col" => {
+                i += 1;
+                mesh_opts.collider_name = Some(args.get(i).ok_or("--col requires node name")?.clone());
+            }
+            "--world" => {
+                i += 1;
+                let s = args.get(i).ok_or("--world requires W,H,D")?;
+                let parts: Result<Vec<f32>, _> = s.split(',').map(|x| x.trim().parse::<f32>()).collect();
+                let nums = parts.map_err(|_| format!("invalid --world '{s}'"))?;
+                if nums.len() != 3 {
+                    return Err("--world expects W,H,D".into());
+                }
+                world_override = Some([nums[0].max(1.0), nums[1].max(0.1), nums[2].max(1.0)]);
+            }
+            "--mats" => {
+                i += 1;
+                let s = args.get(i).ok_or("--mats requires 4 comma-separated swatch names")?;
+                let parts: Vec<String> = s.split(',').map(|x| x.trim().to_string()).collect();
+                if parts.len() != 4 {
+                    return Err("--mats expects 4 swatch names (r,g,b,a)".into());
+                }
+                mats_override = Some([parts[0].clone(), parts[1].clone(), parts[2].clone(), parts[3].clone()]);
+            }
+            "--seed" => {
+                i += 1;
+                seed_override = Some(args.get(i).ok_or("--seed requires integer")?.parse().map_err(|_| "bad --seed")?);
+            }
+            "--size" => {
+                i += 1;
+                let (w, h) = parse_size(args.get(i).ok_or("--size requires WxH")?)?;
+                render_opts.width = w;
+                render_opts.height = h;
+            }
+            "--yaw" => {
+                i += 1;
+                render_opts.yaw_deg = args.get(i).ok_or("--yaw requires deg")?.parse().map_err(|_| "bad --yaw")?;
+            }
+            "--pitch" => {
+                i += 1;
+                render_opts.pitch_deg = args.get(i).ok_or("--pitch requires deg")?.parse().map_err(|_| "bad --pitch")?;
+            }
+            "--wire" | "--wireframe" => render_opts.wireframe = true,
+            a if !a.starts_with('-') && input_ter.is_none() => input_ter = Some(PathBuf::from(a)),
+            other => return Err(format!("unknown terrain arg '{other}'")),
+        }
+        i += 1;
+    }
+
+    let (mut terrain, pal_path) = if let Some(ref hm_path) = from_hm {
+        let h_bytes = std::fs::read(hm_path)
+            .map_err(|e| format!("failed to read heightmap '{}': {e}", hm_path.display()))?;
+        let w_bytes = match weightmap {
+            Some(ref wp) => Some(
+                std::fs::read(wp)
+                    .map_err(|e| format!("failed to read weightmap '{}': {e}", wp.display()))?,
+            ),
+            None => None,
+        };
+        let stem = hm_path.file_stem().and_then(|s| s.to_str()).unwrap_or("terrain");
+        let world = world_override.unwrap_or([100.0, 24.0, 100.0]);
+        let mats = mats_override.clone().unwrap_or_else(|| {
+            [
+                "sand_warm".to_string(),
+                "grass_mid".to_string(),
+                "stone_mid".to_string(),
+                "roof_cream".to_string(),
+            ]
+        });
+        let td = build_from_heightmap_png(&h_bytes, w_bytes.as_deref(), world, stem, mats)?;
+        (td, pal_override)
+    } else {
+        let ter_path = input_ter.ok_or("terrain requires <file.ter> or --from-heightmap <h.png>")?;
+        let doc = load_terrain_file(&ter_path)?;
+        let td = simulate_terrain(&doc, seed_override)?;
+        let resolved_pal = pal_override.or_else(|| {
+            doc.palette_rel
+                .as_ref()
+                .map(|rel| ter_path.parent().unwrap_or_else(|| Path::new(".")).join(rel))
+        });
+        (td, resolved_pal)
+    };
+
+    if let Some(w) = world_override {
+        terrain.world = w;
+    }
+    if let Some(m) = mats_override {
+        terrain.channel_mats = m;
+    }
+
+    let palette = match pal_path {
+        Some(ref pp) => Some(Palette::load_file(pp)?),
+        None => None,
+    };
+
+    let mut maps_info = String::new();
+    if let Some(ref prefix) = out_prefix {
+        let hm_p = PathBuf::from(format!("{prefix}_height16.png"));
+        let sp_p = PathBuf::from(format!("{prefix}_splat.png"));
+        let nm_p = PathBuf::from(format!("{prefix}_normal.png"));
+        ensure_parent(&hm_p)?;
+        let hm_b = terrain.encode_height16_png();
+        let sp_b = terrain.encode_splat_rgba_png();
+        let nm_b = terrain.encode_normal_rgb_png();
+        std::fs::write(&hm_p, &hm_b).map_err(|e| format!("write height16: {e}"))?;
+        std::fs::write(&sp_p, &sp_b).map_err(|e| format!("write splat: {e}"))?;
+        std::fs::write(&nm_p, &nm_b).map_err(|e| format!("write normal: {e}"))?;
+        let kb = (hm_b.len() + sp_b.len() + nm_b.len()) as f64 / 1024.0;
+        maps_info = format!(" maps={:.1}KB->{prefix}_{{height16,splat,normal}}.png", kb);
+    }
+
+    if let Some(ref pp) = preview_png {
+        ensure_parent(pp)?;
+        let png = render_terrain_preview_png(&terrain, palette.as_ref());
+        std::fs::write(pp, png).map_err(|e| format!("write terrain preview: {e}"))?;
+    }
+
+    let mut mesh_info = String::new();
+    if mesh_out.is_some() || render_out.is_some() || turn_out.is_some() {
+        let pal = palette.as_ref().ok_or(
+            "terrain --mesh / --render requires a palette via 'pal <file.pal>' or -p <file.pal>",
+        )?;
+        let mesh = build_terrain_mesh(&terrain, pal, &mesh_opts);
+        if let Some(ref mp) = mesh_out {
+            ensure_parent(mp)?;
+            let is_gltf = mp
+                .extension()
+                .and_then(|e| e.to_str())
+                .map(|e| e.eq_ignore_ascii_case("gltf"))
+                .unwrap_or(false);
+            if is_gltf {
+                let (json, stats) = export_gltf_json(&mesh, pal, &terrain.name, ext_pal.as_deref())?;
+                let rep = validate_gltf_json_str(&json)?;
+                if !rep.is_ok() {
+                    return Err(format!("terrain glTF invalid: {}", rep.errors.join("; ")));
+                }
+                std::fs::write(mp, json.as_bytes()).map_err(|e| format!("write gltf: {e}"))?;
+                mesh_info = format!(" tris={} draws={} gltf={:.1}KB valid=PASS", mesh.tris.len(), stats.draw_calls, json.len() as f64 / 1024.0);
+            } else {
+                let (glb, stats) = export_glb(&mesh, pal, &terrain.name, ext_pal.as_deref())?;
+                let rep = validate_glb_bytes(&glb)?;
+                if !rep.is_ok() {
+                    return Err(format!("terrain GLB invalid: {}", rep.errors.join("; ")));
+                }
+                std::fs::write(mp, &glb).map_err(|e| format!("write glb: {e}"))?;
+                mesh_info = format!(" tris={} draws={} glb={:.1}KB valid=PASS", mesh.tris.len(), stats.draw_calls, glb.len() as f64 / 1024.0);
+            }
+        }
+        if let Some(ref rp) = render_out {
+            ensure_parent(rp)?;
+            let png = render_to_png(&mesh, pal, &render_opts);
+            std::fs::write(rp, png).map_err(|e| format!("write terrain render: {e}"))?;
+        }
+        if let Some(ref tp) = turn_out {
+            ensure_parent(tp)?;
+            let mut topts = render_opts.clone();
+            topts.hud = true;
+            if topts.width == 640 && topts.height == 480 {
+                topts.width = 400;
+                topts.height = 300;
+            }
+            let png = render_turntable_png(&mesh, pal, &topts);
+            std::fs::write(tp, png).map_err(|e| format!("write terrain turnaround: {e}"))?;
+        }
+    }
+
+    let (lo, hi) = terrain.min_max_height();
+    println!(
+        "OK terrain {} {}x{} world=[{:.0}x{:.0}x{:.0}] h=[{:.2}..{:.2}] max_slope={:.0}deg drops={}{}{}",
+        terrain.name,
+        terrain.width,
+        terrain.height,
+        terrain.world[0],
+        terrain.world[1],
+        terrain.world[2],
+        lo,
+        hi,
+        terrain.max_slope_deg(),
+        terrain.drops_simulated,
+        maps_info,
+        mesh_info
+    );
+    Ok(())
+}
+
 fn cmd_validate(args: &[String]) -> Result<(), String> {
     let mut path: Option<PathBuf> = None;
     let mut expect_loop = false;
@@ -657,8 +926,13 @@ USAGE:
   artisan svg <file.svg> [-o <out.png>] [--preview <qa.png>]
               [--size WxH] [--scale S] [--bg #hex|checker]
               [--9slice T,R,B,L] [--grid] [--hud 0|1] [--bleed 0|1]
+  artisan terrain <file.ter> [-p <pal>] [-o <prefix>] [--preview <diag.png>]
+                  [--mesh <out.glb|.gltf>] [--render <3d.png>] [--turn <turn.png>]
+                  [--grid N] [--tris N] [--skirt 0|1] [--smooth 0|1] [--col <node>] [--seed S]
+  artisan terrain --from-heightmap <h.png> [--weightmap <w.png>] [-p <pal>] [--world W,H,D]
+                  [--mesh <out.glb|.gltf>] [--render <3d.png>] [--preview <diag.png>] [--grid N] [--tris N]
   artisan validate <file.glb|.gltf|.wav|.svg> [--loop]
-  artisan spec [pal|mesh|sfx|svg]"#
+  artisan spec [pal|mesh|sfx|svg|terrain]"#
     );
 }
 
@@ -753,6 +1027,26 @@ Transform: translate, scale, rotate(deg [cx cy]), skewX, skewY, matrix
 Notes:     Render fonts/text in-engine for localization (<text> emits a warning and is skipped).
            -o emits transparent RGBA PNG with GPU alpha-bleed (--bleed 1); --preview adds checkerboard,
            viewBox frame, HUD telemetry, optional --grid and --9slice T,R,B,L guides."##
+        );
+    }
+    if topic == "all" || topic == "terrain" {
+        println!(
+            r#"=== TERRAIN (.ter) — Eroded 16-bit heightmaps, biome weightmaps & low-poly decimated GLB ===
+Header:    terrain <name> [size=256] [world=100,24,100] [seed=42] [sea=0]  |  pal <rel.pal>  |  $var = expr
+Stamps:    (normalized u,v in [-0.5..0.5], 0,0 = center)
+  base <sketch.png> [scale=1] [bias=0] [blur=0]
+  island [r=.44] [falloff=2] [h=.28]
+  peak <u,v> <r> <h> [sharp=1.4] [op=add|max|set]
+  ridge <u0,v0> <u1,v1> <w> <h> [sharp=1.35] [op=max|add]  (or polyline u0:v0,u1:v1,...)
+  plateau <u,v> <r> <h> [flat=.72] [blend=.95]   (buildable flat pad / mesa)
+  valley <u0,v0> <u1,v1> <w> <depth> [flat=.28]  (carves river / pass / road)
+  crater <u,v> <r> <depth> [rim=.18]  |  slope <dir_deg> <lo> <hi>  |  smooth [iters=2]  |  norm
+Noise:     noise <fbm|ridge|billow|warp> [oct=5] [freq=3] [amp=.18] [lac=2.05] [gain=.5] [mask=all|high|low|slope]
+Erosion:   erode [drops=45000] [inertia=.12] [cap=4] [dep=.25] [ero=.3] [evap=.02] [rad=2] [steps=48] [thermal=8] [talus=.012]
+Splats:    splat <r|g|b|a> <mat_name> [h=0..1] [slope=0..90] [flow=0..1] [w=1] [sharp=10]
+Outputs:   -o <prefix> -> _height16.png (16-bit lossless), _splat.png (RGBA), _normal.png (RGB)
+           --preview -> 2x2 QA sheet (hillshade, elevation heatmap, flow/erosion, biome splatmap)
+           --mesh out.glb [--grid 64] [--tris 2500] [--skirt 1] [--col terrain-colonly]"#
         );
     }
     Ok(())

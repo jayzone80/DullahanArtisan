@@ -1,0 +1,26 @@
+pal ../palette.pal
+# Highland Cove — Designed Macro Layout + Warped/Ridged Noise + 65k Droplet Hydraulic Erosion + 4-Biome Weightmap
+terrain highland_cove size=256 world=120,24,120 seed=42 sea=.13
+
+# 1. Designed macro landmass, mountain spine, buildable plateau, winding river & headland tarn
+island   r=.47 falloff=2.0 h=.28
+ridge   -.34:-.30,-.06:-.35,.28:-.20  w=.28 h=.78 sharp=1.18 op=max
+peak    -.22,-.26  .24 .88 sharp=1.35 op=max
+peak     .22,-.16  .22 .78 sharp=1.30 op=max
+plateau -.04,.04   .16 .36 flat=.72 blend=.90
+valley  -.02:-.24,.08:-.06,.18:.12,.12:.38 w=.12 depth=.22 flat=.30
+crater  -.28,.16   .13 .15 rim=.12
+
+# 2. Procedural geological noise overlay (domain warp + ridged alpine ribs)
+noise warp  oct=5 freq=2.6 amp=.16 mask=high
+noise ridge oct=4 freq=4.2 amp=.11 mask=slope
+
+# 3. Hydraulic droplet erosion (65k drops) + thermal talus relaxation
+erode drops=65000 inertia=.12 cap=4.2 dep=.24 ero=.32 evap=.02 rad=2 steps=52 thermal=12 talus=.012
+norm
+
+# 4. 4-channel normalized biome splat/weightmap (R=sand, G=grass, B=cliff rock, A=alpine snow)
+splat r sand_warm  h=0..0.19    slope=0..26  w=1.4 sharp=16
+splat g grass_mid  h=0.14..0.66 slope=0..34  w=1.2 sharp=12
+splat b stone_mid  h=0.0..1.0   slope=32..90 w=1.5 sharp=14
+splat a roof_cream h=0.68..1.0  slope=0..62  w=1.7 sharp=15

@@ -12,6 +12,10 @@ use dullahan_artisan::sfx::parser::load_sound_file;
 use dullahan_artisan::sfx::wav::{decode_pcm16_bytes, encode_pcm16_bytes};
 use dullahan_artisan::svg::parser::{load_svg_file, parse_svg};
 use dullahan_artisan::svg::raster::{render_svg_png, SvgRenderOptions};
+use dullahan_artisan::terrain::mesher::{build_terrain_mesh, TerrainMeshOptions};
+use dullahan_artisan::terrain::parser::load_terrain_file;
+use dullahan_artisan::terrain::preview::render_terrain_preview_png;
+use dullahan_artisan::terrain::sim::{build_from_heightmap_png, simulate_terrain};
 
 #[test]
 fn palette_and_all_example_models_build_validate_render() {
@@ -161,4 +165,51 @@ end
     opts.show_colliders = true;
     let png = render_to_png(&parsed.mesh, &pal, &opts);
     assert!(inspect_and_verify_png(&png).is_ok());
+}
+
+#[test]
+fn example_terrain_erodes_decimates_and_roundtrips_heightmap() {
+    let pal = Palette::load_file(Path::new("examples/palette.pal")).unwrap();
+    let doc = load_terrain_file(Path::new("examples/terrain/highland_cove.ter")).unwrap();
+    let td = simulate_terrain(&doc, None).unwrap();
+    assert_eq!((td.width, td.height), (256, 256));
+    assert!(td.drops_simulated >= 50_000);
+
+    // 16-bit lossless heightmap + RGBA splatmap + RGB normal map + 2x2 QA preview
+    let hm16 = td.encode_height16_png();
+    let hm_info = inspect_and_verify_png(&hm16).unwrap();
+    assert_eq!((hm_info.width, hm_info.height, hm_info.bit_depth, hm_info.color_type), (256, 256, 16, 0));
+
+    let splat = td.encode_splat_rgba_png();
+    assert!(inspect_and_verify_png(&splat).is_ok());
+    let norm = td.encode_normal_rgb_png();
+    assert!(inspect_and_verify_png(&norm).is_ok());
+    let prev = render_terrain_preview_png(&td, Some(&pal));
+    assert!(inspect_and_verify_png(&prev).is_ok());
+
+    // QEM decimated low-poly GLB mesh with diorama skirt + collider node
+    let mut mopts = TerrainMeshOptions::default();
+    mopts.grid = 48;
+    mopts.target_tris = Some(1600);
+    mopts.collider_name = Some("highland_cove-colonly".into());
+    let mesh = build_terrain_mesh(&td, &pal, &mopts);
+    assert!(mesh.tris.len() < 2400);
+    assert_eq!(mesh.colliders.len(), 1);
+    let (glb, _) = export_glb(&mesh, &pal, &td.name, None).unwrap();
+    let rep = validate_glb_bytes(&glb).unwrap();
+    assert!(rep.is_ok(), "terrain GLB errors: {:?}", rep.errors);
+
+    // Round-trip from external 16-bit heightmap + RGBA weightmap PNGs -> GLB
+    let td2 = build_from_heightmap_png(
+        &hm16,
+        Some(&splat),
+        td.world,
+        "from_hm",
+        td.channel_mats.clone(),
+    )
+    .unwrap();
+    let mesh2 = build_terrain_mesh(&td2, &pal, &TerrainMeshOptions { grid: 32, target_tris: Some(900), skirt: true, smooth: false, collider_name: None });
+    let (glb2, _) = export_glb(&mesh2, &pal, "from_hm", None).unwrap();
+    let rep2 = validate_glb_bytes(&glb2).unwrap();
+    assert!(rep2.is_ok(), "from-heightmap GLB errors: {:?}", rep2.errors);
 }
