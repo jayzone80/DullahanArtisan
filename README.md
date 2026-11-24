@@ -32,14 +32,14 @@ Pure-DSP synthesis (PolyBLEP oscillators, stereo supersaws, FM, modal partials, 
 <details>
 <summary><b>▶ Listen: Living Stereo Woodland Ambience</b> (2 seamless 8s loops)</summary>
 
-https://github.com/user-attachments/assets/7e0c8df5-8e6c-4028-8692-994167e55e3a
+https://github.com/user-attachments/assets/bf12b342-ffc5-4ce0-be2c-579f207f7ba0
 
 </details>
 
 <details>
 <summary><b>▶ Listen: Arcade Anthem 4-Bar Musical Loop</b> (116 BPM, 2 seamless loops)</summary>
 
-https://github.com/user-attachments/assets/bf12b342-ffc5-4ce0-be2c-579f207f7ba0
+https://github.com/user-attachments/assets/7e0c8df5-8e6c-4028-8692-994167e55e3a
 
 </details>
 
