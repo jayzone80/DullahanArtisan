@@ -72,6 +72,7 @@ Adapt visual style, acoustic character, and geometric/sonic detail freely to the
   - Use `cl=1` on periodic oscillators/LFOs and `curve=lin` for phase-coherent loops; use `curve=eqp` for uncorrelated noise/ambient beds.
   - Prefer placing shared `rev`/`dly` on enclosing `pat`/`seq`/`bus` tracks rather than inside high-frequency per-hit voice `def`s.
   - Use `--var N` on one-shots to emit deterministic `_01.._NN` variations.
+  - **Fake Speech / Dialogue Voices**: Build expressive formant-filtered vowel voice banks (`def` voices in `.kit` using `osc saw/pls` + parallel `flt bp` formants + `penv` inflection) for text-driven dialogue blips or `seq` gibberish barks; see [references/sound-principles.md](./references/sound-principles.md).
 - **Technical Audio QA** (check stdout telemetry + `--plot` PNG):
   - `clip=0`, `dc < 0.02`, clean spectral balance without unintended sub-30 Hz rumble (high-pass master bus).
   - For loops: confirm `seam <= 0.03` (ideal) / `< 0.08` (max) and inspect the ±25 ms Loop Seam Zoom panel for smooth continuity.

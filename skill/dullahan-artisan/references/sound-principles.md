@@ -28,3 +28,24 @@ Genre-neutral acoustic synthesis and mixing guidelines for authoring clean one-s
    - Midpoint swell on periodic loops → use `curve=lin`; midpoint dip on noise beds → use `curve=eqp`.
 2. **Dynamics & cleanliness**: `clip=0`, `dc < 0.02`, crisp non-truncated transient in Attack Zoom.
 3. **Spectral balance**: verify the 6-band bar chart and spectrogram match the intended acoustic role (e.g., no unintended sub rumble on high foley, no piercing upper-band sideband smear on soft whistles).
+
+---
+
+## 4. Character Voices & Fake Speech Synthesis (Dialogue Blips & Gibberish)
+
+Author expressive indie-game dialogue voices (think *Animal Crossing*, *Banjo-Kazooie*, *Undertale*, *Celeste*) directly in a shared `.kit` + `.sfx` — no speech engine required:
+
+### Synthesizing a Character Voice Kit (`.kit`)
+- **Glottal source + parallel formants**: Drive a rich harmonic oscillator (`osc saw` or `osc pls pwm=.32` with gentle pitch contour `penv=` and subtle vibrato `lfo=p:5.5:10`) into **2 parallel resonant bandpass filters** (`flt bp` at `F1` and `F2` with `q=3.5..6`), plus a tiny `noi pink` burst (`8–15 ms`, high `bp`) for consonant/breath articulation.
+- **Core Vowel Formants (`F1 / F2` Hz)** — shift base pitch & scale formants `×1.25–1.55` for small/cute characters, `×0.70–0.85` for deep/monstrous voices, or swap `osc saw` → `fm` / `crush` for robots and aliens:
+  - `a` ("ah"): `700 / 1200 Hz` · `e` ("eh"): `550 / 1850 Hz` · `i` ("ee"): `300 / 2300 Hz` · `o` ("oh"): `480 / 900 Hz` · `u` ("oo"): `320 / 750 Hz`.
+- **Two authoring workflows**:
+  1. **Phoneme Bank (`.kit` → short `70–120 ms` `.wav` clips)**: Export `voice_a`, `voice_e`, `voice_i`, `voice_o`, `voice_u` (plus optional `voice_cons` soft click/breath) using `--var 3` so repeated letters never sound identical.
+  2. **Pre-baked Emote Phrases (`.sfx` using `seq` / `ref`)**: Sequence 3–6 quick vowel defs with prosody arcs (`penv` rising for *question*, falling for *agree*, spiky for *surprise/angry*) for non-verbal barks and reactions.
+
+### Mapping Text to Voice Blips (Runtime Principle)
+- **Trigger on syllables / vowels (every 2–3 typed chars)** rather than every single letter to avoid machine-gun clutter:
+  - Map `a / e / i / o / u` (and accented equivalents) → the matching formant clip; fall back to `e` or `o` for consonant-only chunks, and layer the soft consonant click on plosives (`p, t, k, b, d, g`).
+  - **Cadence**: pause on spaces/commas (`60–140 ms`), hold slightly longer on stressed/capitalized words.
+  - **Prosody from punctuation**: ramp pitch **up** `+2..+4` semitones over the final 2–3 syllables before `?`, boost pitch + slight gain on `!`, and slow cadence + drop pitch on `...`.
+  - **Humanization**: apply deterministic word-hashed pitch variance (`±0.8` semitones) and a short `10–15 ms` voice-steal fade so fast dialogue flows cleanly.
