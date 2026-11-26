@@ -399,7 +399,10 @@ pub fn build_sdf_mesh(prims: &[SdfPrim], res: usize, smooth_normals: bool) -> Me
                 nc: t_nc,
                 face_normal: face_n,
                 uv: mat.uv,
+                uv_b: mat.uv,
+                uv_c: mat.uv,
                 is_translucent: mat.is_translucent,
+                tex_id: None,
                 rigid_bone: None,
                 part_tag: None,
             });

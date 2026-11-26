@@ -314,6 +314,7 @@ pub fn evaluate_pose(
         bones: posed_bones,
         morphs: Vec::new(),
         tag_names: Vec::new(),
+        textures: mesh.textures.clone(),
     };
     for node in &mesh.nodes {
         eval_node_recursive(node, Mat4::IDENTITY, &tracks, t, &mut out, &mut pivots);

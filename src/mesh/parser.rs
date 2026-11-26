@@ -3,9 +3,10 @@ use std::path::{Path, PathBuf};
 
 use crate::common::expr::ExprEnv;
 use crate::common::math::{Aabb, Mat4, Vec2, Vec3};
+use crate::common::png::decode_png;
 use crate::mesh::anim::{AnimAction, AnimEvent, AnimKeyframe, InterpMode};
 use crate::mesh::csg::{apply_csg, CsgOp};
-use crate::mesh::geom::{ChildNodeMesh, ColliderMesh, Mesh};
+use crate::mesh::geom::{ChildNodeMesh, ColliderMesh, Mesh, TexMaterial};
 use crate::mesh::morph::{build_morph_target, MorphKeyframe, MorphOp};
 use crate::mesh::palette::{Palette, ResolvedMat};
 use crate::mesh::primitives::{
@@ -15,6 +16,19 @@ use crate::mesh::primitives::{
 };
 use crate::mesh::sdf::{build_sdf_mesh, SdfOp, SdfPrim, SdfShape};
 use crate::mesh::skel::{mirror_bone_name, Bone, IkKeyframe};
+use crate::tex::bake::bake_texture;
+use crate::tex::parser::load_tex_file;
+
+#[derive(Debug, Clone, Copy)]
+struct TexBand {
+    tex_id: u16,
+    u0: f32,
+    v0: f32,
+    u1: f32,
+    v1: f32,
+    /// When true, `u` tiles freely along world length (`tile_w`) while `v` clamps strictly to `[v0..v1]`!
+    is_strip: bool,
+}
 
 #[derive(Debug, Clone)]
 pub struct ParsedModel {
@@ -265,6 +279,8 @@ pub fn compile_model_with_dir(
     let mut visited_kits: HashSet<PathBuf> = HashSet::new();
     let mut raw_lines = Vec::new();
     let mut pal_rel = None;
+    let mut tex_decls: Vec<RawLine> = Vec::new();
+    let mut band_decls: Vec<RawLine> = Vec::new();
 
     for (idx, line) in text.lines().enumerate() {
         let lineno = idx + 1;
@@ -280,6 +296,14 @@ pub fn compile_model_with_dir(
             if let Some(p) = tokens.get(1) {
                 pal_rel = Some(p.clone());
             }
+            continue;
+        }
+        if tokens[0].eq_ignore_ascii_case("tex") || tokens[0].eq_ignore_ascii_case("texture") {
+            tex_decls.push(RawLine { lineno, tokens });
+            continue;
+        }
+        if tokens[0].eq_ignore_ascii_case("band") || tokens[0].eq_ignore_ascii_case("trim") {
+            band_decls.push(RawLine { lineno, tokens });
             continue;
         }
         if let Some(rel) = is_kit_include_line(&tokens) {
@@ -418,12 +442,107 @@ pub fn compile_model_with_dir(
         }
     }
 
+    // Load declared PBR texture sets (`tex <name> <path.tex|png_prefix> [tile=w,h] [res=N]`)
+    let mut textures: Vec<TexMaterial> = Vec::new();
+    let mut tex_map: HashMap<String, u16> = HashMap::new();
+    for tl in &tex_decls {
+        if tl.tokens.len() < 3 {
+            return Err(format!(
+                "line {}: tex requires <name> <path.tex|png_prefix> [tile=w,h] [res=N]",
+                tl.lineno
+            ));
+        }
+        let tname = tl.tokens[1].clone();
+        let rel_path = &tl.tokens[2];
+        let mut tile_override: Option<(f32, f32)> = None;
+        let mut res_override: Option<u32> = None;
+        for tok in &tl.tokens[3..] {
+            if let Some((k, v)) = tok.split_once('=') {
+                match k.to_ascii_lowercase().as_str() {
+                    "tile" | "world" => {
+                        let vals = env.eval_list_f32(v).map_err(|e| format!("line {}: {e}", tl.lineno))?;
+                        match vals.as_slice() {
+                            [s] => tile_override = Some((*s, *s)),
+                            [w, h] => tile_override = Some((*w, *h)),
+                            _ => return Err(format!("line {}: bad tile='{v}'", tl.lineno)),
+                        }
+                    }
+                    "res" | "size" => {
+                        res_override = Some(
+                            v.parse::<u32>()
+                                .map_err(|_| format!("line {}: bad res='{v}'", tl.lineno))?
+                                .max(32),
+                        );
+                    }
+                    _ => {}
+                }
+            }
+        }
+        let full_path = base_dir
+            .map(|d| d.join(rel_path))
+            .unwrap_or_else(|| PathBuf::from(rel_path));
+        let mut tm = load_tex_material_for_mdl(&tname, &full_path, res_override)
+            .map_err(|e| format!("line {}: {e}", tl.lineno))?;
+        if let Some((tw, th)) = tile_override {
+            tm.tile_w = tw.max(0.05);
+            tm.tile_h = th.max(0.05);
+        }
+        let tid = textures.len() as u16;
+        tex_map.insert(tname.to_ascii_lowercase(), tid);
+        textures.push(tm);
+    }
+
+    // Parse named trim bands (`band <name> <tex_name> <v0..v1|u0,v0,u1,v1>`)
+    let mut band_map: HashMap<String, TexBand> = HashMap::new();
+    for bl in &band_decls {
+        if bl.tokens.len() < 4 {
+            return Err(format!(
+                "line {}: band requires <name> <tex_name> <v0..v1|u0,v0,u1,v1>",
+                bl.lineno
+            ));
+        }
+        let bname = bl.tokens[1].to_ascii_lowercase();
+        let tkey = bl.tokens[2].to_ascii_lowercase();
+        let Some(&tex_id) = tex_map.get(&tkey) else {
+            return Err(format!(
+                "line {}: band '{}' references unknown tex '{}' (declare with `tex {} ...` first)",
+                bl.lineno, bl.tokens[1], bl.tokens[2], bl.tokens[2]
+            ));
+        };
+        let range_tok = &bl.tokens[3];
+        let band = if let Some((a, b)) = range_tok.split_once("..") {
+            let v0 = env.eval_f32(a.trim()).map_err(|e| format!("line {}: {e}", bl.lineno))?;
+            let v1 = env.eval_f32(b.trim()).map_err(|e| format!("line {}: {e}", bl.lineno))?;
+            TexBand { tex_id, u0: 0.0, v0, u1: 1.0, v1, is_strip: true }
+        } else {
+            let vals = env.eval_list_f32(range_tok).map_err(|e| format!("line {}: {e}", bl.lineno))?;
+            if vals.len() != 4 {
+                return Err(format!(
+                    "line {}: band expects v0..v1 or u0,v0,u1,v1, got '{range_tok}'",
+                    bl.lineno
+                ));
+            }
+            TexBand {
+                tex_id,
+                u0: vals[0],
+                v0: vals[1],
+                u1: vals[2],
+                v1: vals[3],
+                is_strip: false,
+            }
+        };
+        band_map.insert(bname, band);
+    }
+
     let mut ctx = EvalCtx {
         palette,
         defs: &defs,
         cli_overrides,
         bones: &bones,
         bone_map: &bone_map,
+        textures: &textures,
+        tex_map: &tex_map,
+        band_map: &band_map,
         env,
         part_count: 0,
     };
@@ -432,6 +551,7 @@ pub fn compile_model_with_dir(
     let part_count = ctx.part_count;
     let mut final_env = ctx.env;
     mesh.bones = bones;
+    mesh.textures = textures;
 
     // Evaluate `morph <name> [w=0] ... end` blend shapes against the compiled root mesh!
     for (hdr, mbody) in &morph_blocks {
@@ -642,11 +762,41 @@ struct EvalCtx<'a> {
     cli_overrides: &'a HashMap<String, String>,
     bones: &'a [Bone],
     bone_map: &'a HashMap<String, u16>,
+    textures: &'a [TexMaterial],
+    tex_map: &'a HashMap<String, u16>,
+    band_map: &'a HashMap<String, TexBand>,
     env: ExprEnv,
     part_count: usize,
 }
 
 impl<'a> EvalCtx<'a> {
+    /// Check if `raw` matches a declared `tex` or `band` name (returns `(tex_id, optional_band)`).
+    fn resolve_tex_or_band(&self, raw: &str, overrides: &HashMap<String, String>) -> Option<(u16, Option<TexBand>)> {
+        let local_mapped = overrides
+            .get(raw)
+            .or_else(|| overrides.get(&raw.to_ascii_lowercase()))
+            .map(|s| s.as_str())
+            .unwrap_or(raw);
+        let final_mapped = self
+            .cli_overrides
+            .get(local_mapped)
+            .or_else(|| self.cli_overrides.get(&local_mapped.to_ascii_lowercase()))
+            .map(|s| s.as_str())
+            .unwrap_or(local_mapped);
+        let stripped = final_mapped
+            .strip_prefix("tex:")
+            .or_else(|| final_mapped.strip_prefix("band:"))
+            .unwrap_or(final_mapped);
+        let key = stripped.to_ascii_lowercase();
+        if let Some(&b) = self.band_map.get(&key) {
+            return Some((b.tex_id, Some(b)));
+        }
+        if let Some(&tid) = self.tex_map.get(&key) {
+            return Some((tid, None));
+        }
+        None
+    }
+
     fn resolve_mat_name(
         &self,
         raw: &str,
@@ -1600,10 +1750,11 @@ impl<'a> EvalCtx<'a> {
         }
         let flags = parse_flags(&flag_tokens, &self.env, lineno)?;
 
-        // First positional arg is material name unless omitted (only when inherited_mat exists & arg0 looks numeric/vec)
+        // First positional arg is material/tex/band name unless omitted (only when inherited_mat exists & arg0 looks numeric/vec)
         let (mat_str, rest) = if pos_args.is_empty() {
             return Err(format!("line {lineno}: primitive '{op}' missing arguments"));
         } else if inherited_mat.is_some()
+            && self.resolve_tex_or_band(&pos_args[0], overrides).is_none()
             && self.palette.resolve_mat(&pos_args[0]).is_err()
             && !pos_args[0].starts_with("cell:")
             && !pos_args[0].starts_with("uv:")
@@ -1614,7 +1765,12 @@ impl<'a> EvalCtx<'a> {
             (pos_args[0].as_str(), &pos_args[1..])
         };
 
-        let mat = self.resolve_mat_name(mat_str, overrides, lineno)?;
+        let tex_binding = self.resolve_tex_or_band(mat_str, overrides);
+        let mat = if tex_binding.is_some() {
+            ResolvedMat { uv: Vec2::new(0.5, 0.5), is_translucent: false }
+        } else {
+            self.resolve_mat_name(mat_str, overrides, lineno)?
+        };
         let mut fc = FaceMats::default();
         for (face_k, mat_v) in &flags.face_colors {
             fc.map
@@ -1853,6 +2009,48 @@ impl<'a> EvalCtx<'a> {
                 }
                 m
             }
+            "quad" => {
+                default_anchor = Anchor::Origin;
+                if rest.len() < 4 {
+                    return Err(format!("line {lineno}: quad requires <x0:y0:z0> <x1:y1:z1> <x2:y2:z2> <x3:y3:z3>"));
+                }
+                let p0 = self.parse_vec3_colon(&rest[0], lineno)?;
+                let p1 = self.parse_vec3_colon(&rest[1], lineno)?;
+                let p2 = self.parse_vec3_colon(&rest[2], lineno)?;
+                let p3 = self.parse_vec3_colon(&rest[3], lineno)?;
+                let ds = self.opt_bool(&flags, "ds", false);
+                let off = self.opt_f32(&flags, "off", 0.001, lineno)?.abs().max(1e-4);
+                let mut m = Mesh::new();
+                if let Some((tid, band_opt)) = tex_binding {
+                    let (u0, v0, u1, v1) = self.resolve_quad_uv_rect(p0, p1, p3, tid, band_opt, &flags, lineno)?;
+                    let (ua, ub, uc, ud) = transform_quad_uvs(
+                        Vec2::new(u0, v1),
+                        Vec2::new(u1, v1),
+                        Vec2::new(u1, v0),
+                        Vec2::new(u0, v0),
+                        &flags,
+                        &self.env,
+                        lineno,
+                    )?;
+                    let n = (p1 - p0).cross(p2 - p0).normalized();
+                    if ds {
+                        let shift = if n.len_sq() > 0.5 { n * off } else { Vec3::ZERO };
+                        m.add_quad_uv(p0 + shift, p1 + shift, p2 + shift, p3 + shift, ua, ub, uc, ud, Some(tid), mat.is_translucent);
+                        m.add_quad_uv(p1 - shift, p0 - shift, p3 - shift, p2 - shift, ub, ua, ud, uc, Some(tid), mat.is_translucent);
+                    } else {
+                        m.add_quad_uv(p0, p1, p2, p3, ua, ub, uc, ud, Some(tid), mat.is_translucent);
+                    }
+                } else if ds {
+                    let n = (p1 - p0).cross(p2 - p0).normalized();
+                    let shift = if n.len_sq() > 0.5 { n * off } else { Vec3::ZERO };
+                    let m_back = fc.pick(mat, &["k", "back", "b", "bot", "bottom"]);
+                    m.add_quad(p0 + shift, p1 + shift, p2 + shift, p3 + shift, mat);
+                    m.add_quad(p1 - shift, p0 - shift, p3 - shift, p2 - shift, m_back);
+                } else {
+                    m.add_quad(p0, p1, p2, p3, mat);
+                }
+                m
+            }
             "rib" | "ribbon" => {
                 default_anchor = Anchor::Bottom;
                 if rest.len() < 2 {
@@ -1873,6 +2071,12 @@ impl<'a> EvalCtx<'a> {
                 return Err(format!("line {lineno}: unknown opcode '{op}'"));
             }
         };
+
+        if let Some((tid, band_opt)) = tex_binding {
+            if op != "quad" {
+                self.apply_tex_uvs(&mut local, op, tid, band_opt, &flags, lineno)?;
+            }
+        }
 
         if flags.smooth && flags.weighted_normals.is_none() {
             local.compute_smooth_normals();
@@ -1959,6 +2163,200 @@ impl<'a> EvalCtx<'a> {
             out.push(Vec2::new(x, y));
         }
         Ok(out)
+    }
+
+    fn resolve_uv_spec(
+        &self,
+        band_opt: Option<TexBand>,
+        flags: &CommonFlags,
+        lineno: usize,
+    ) -> Result<Option<(f32, f32, f32, f32, bool)>, String> {
+        if let Some(uv_str) = flags.extras.get("uv") {
+            let clean = uv_str.strip_prefix("band:").unwrap_or(uv_str);
+            if let Some(b) = self.band_map.get(&clean.to_ascii_lowercase()) {
+                return Ok(Some((b.u0, b.v0, b.u1, b.v1, b.is_strip)));
+            }
+            if let Some((a, b)) = clean.split_once("..") {
+                let v0 = self.env.eval_f32(a.trim()).map_err(|e| format!("line {lineno}: {e}"))?;
+                let v1 = self.env.eval_f32(b.trim()).map_err(|e| format!("line {lineno}: {e}"))?;
+                return Ok(Some((0.0, v0, 1.0, v1, true)));
+            }
+            let vals = self.env.eval_list_f32(clean).map_err(|e| format!("line {lineno}: {e}"))?;
+            if vals.len() != 4 {
+                return Err(format!("line {lineno}: uv= expects u0,v0,u1,v1, v0..v1, or band name"));
+            }
+            return Ok(Some((vals[0], vals[1], vals[2], vals[3], false)));
+        }
+        Ok(band_opt.map(|b| (b.u0, b.v0, b.u1, b.v1, b.is_strip)))
+    }
+
+    fn resolve_quad_uv_rect(
+        &self,
+        p0: Vec3,
+        p1: Vec3,
+        p3: Vec3,
+        tid: u16,
+        band_opt: Option<TexBand>,
+        flags: &CommonFlags,
+        lineno: usize,
+    ) -> Result<(f32, f32, f32, f32), String> {
+        let tm = &self.textures[tid as usize];
+        let len_u = (p1 - p0).len();
+        let len_v = (p3 - p0).len();
+        if let Some((u0, v0, u1, v1, is_strip)) = self.resolve_uv_spec(band_opt, flags, lineno)? {
+            if is_strip {
+                Ok((0.0, v0, len_u / tm.tile_w, v1))
+            } else {
+                Ok((u0, v0, u1, v1))
+            }
+        } else {
+            Ok((0.0, 0.0, len_u / tm.tile_w, len_v / tm.tile_h))
+        }
+    }
+
+    fn apply_tex_uvs(
+        &self,
+        mesh: &mut Mesh,
+        op: &str,
+        tid: u16,
+        band_opt: Option<TexBand>,
+        flags: &CommonFlags,
+        lineno: usize,
+    ) -> Result<(), String> {
+        let tm = &self.textures[tid as usize];
+        let bb = mesh.compute_bounds();
+        if !bb.is_valid() {
+            return Ok(());
+        }
+        let uv_spec = self.resolve_uv_spec(band_opt, flags, lineno)?;
+        let uvs = match flags.extras.get("uvs") {
+            Some(s) => self.parse_vec2_or_scalar(s, lineno)?,
+            None => Vec2::new(1.0, 1.0),
+        };
+        let uvo = match flags.extras.get("uvo") {
+            Some(s) => self.parse_vec2(s, lineno)?,
+            None => Vec2::ZERO,
+        };
+        let uvr_deg = self.opt_f32(flags, "uvr", 0.0, lineno)?;
+        let rot_rad = uvr_deg.to_radians();
+        let (rs, rc) = rot_rad.sin_cos();
+
+        let finalize_uv = |u: f32, v: f32| -> Vec2 {
+            let su = u * uvs.x + uvo.x;
+            let sv = v * uvs.y + uvo.y;
+            if uvr_deg.abs() > 1e-4 {
+                Vec2::new(su * rc - sv * rs, su * rs + sv * rc)
+            } else {
+                Vec2::new(su, sv)
+            }
+        };
+
+        let y_span = (bb.max.y - bb.min.y).max(1e-4);
+        let is_cyl = matches!(op, "cyl" | "cone" | "cap" | "lat");
+        let cyl_r = ((bb.max.x - bb.min.x).max(bb.max.z - bb.min.z) * 0.5).max(0.05);
+        let cyl_rep = ((std::f32::consts::TAU * cyl_r) / tm.tile_w).round().max(1.0);
+
+        for t in &mut mesh.tris {
+            t.tex_id = Some(tid);
+            let fn_v = t.face_normal;
+            if is_cyl && fn_v.y.abs() < 0.72 {
+                // Seamless cylindrical unwrap around Y axis (fixing atan2 seam wrap per triangle!)
+                let mut us = [0.0f32; 3];
+                let mut vs = [0.0f32; 3];
+                let pts = [t.a, t.b, t.c];
+                for k in 0..3 {
+                    let ang = pts[k].x.atan2(pts[k].z); // -pi..+pi
+                    let u_raw = (ang / std::f32::consts::TAU) + 0.5;
+                    us[k] = u_raw;
+                    vs[k] = if let Some((_, v0, _, v1, _)) = uv_spec {
+                        let frac = ((bb.max.y - pts[k].y) / y_span).clamp(0.0, 1.0);
+                        v0 + (v1 - v0) * frac
+                    } else {
+                        (bb.max.y - pts[k].y) / tm.tile_h
+                    };
+                }
+                // Unwrap seam-straddling triangle so U increases monotonically across the 0/1 wrap
+                let u_min = us[0].min(us[1]).min(us[2]);
+                let u_max = us[0].max(us[1]).max(us[2]);
+                if u_max - u_min > 0.5 {
+                    for u in &mut us {
+                        if *u < 0.5 {
+                            *u += 1.0;
+                        }
+                    }
+                }
+                let u_scale = if let Some((u0, _, u1, _, is_strip)) = uv_spec {
+                    if is_strip { cyl_rep } else { u1 - u0 }
+                } else {
+                    cyl_rep
+                };
+                let u_base = if let Some((u0, _, _, _, is_strip)) = uv_spec {
+                    if is_strip { 0.0 } else { u0 }
+                } else {
+                    0.0
+                };
+                t.uv = finalize_uv(u_base + us[0] * u_scale, vs[0]);
+                t.uv_b = finalize_uv(u_base + us[1] * u_scale, vs[1]);
+                t.uv_c = finalize_uv(u_base + us[2] * u_scale, vs[2]);
+            } else {
+                // Triplanar / box projection with automatic band V-mapping on vertical walls!
+                let ax = fn_v.x.abs();
+                let ay = fn_v.y.abs();
+                let az = fn_v.z.abs();
+                let map_pt = |p: Vec3| -> Vec2 {
+                    let (u_world, v_world, is_vert) = if ay >= ax && ay >= az {
+                        // Top / bottom horizontal cap
+                        let sgn = if fn_v.y >= 0.0 { 1.0 } else { -1.0 };
+                        ((p.x - bb.min.x) / tm.tile_w, (sgn * (p.z - bb.min.z)) / tm.tile_h, false)
+                    } else if az >= ax {
+                        // +Z front / -Z back wall
+                        let u_w = if fn_v.z >= 0.0 { p.x - bb.min.x } else { bb.max.x - p.x };
+                        (u_w / tm.tile_w, (bb.max.y - p.y) / tm.tile_h, true)
+                    } else {
+                        // +X right / -X left wall
+                        let u_w = if fn_v.x >= 0.0 { bb.max.z - p.z } else { p.z - bb.min.z };
+                        (u_w / tm.tile_w, (bb.max.y - p.y) / tm.tile_h, true)
+                    };
+
+                    if let Some((u0, v0, u1, v1, is_strip)) = uv_spec {
+                        if is_strip {
+                            if is_vert {
+                                let frac = ((bb.max.y - p.y) / y_span).clamp(0.0, 1.0);
+                                finalize_uv(u_world, v0 + (v1 - v0) * frac)
+                            } else {
+                                // Map horizontal top/bottom caps cleanly inside the middle of the trim band
+                                let vm = 0.5 * (v0 + v1);
+                                let vh = (v1 - v0) * 0.45;
+                                let zf = ((p.z - bb.min.z) / (bb.max.z - bb.min.z).max(1e-4) - 0.5) * 2.0;
+                                finalize_uv(u_world, (vm + zf * vh).clamp(v0, v1))
+                            }
+                        } else {
+                            let uf = if is_vert {
+                                if az >= ax {
+                                    (p.x - bb.min.x) / (bb.max.x - bb.min.x).max(1e-4)
+                                } else {
+                                    (p.z - bb.min.z) / (bb.max.z - bb.min.z).max(1e-4)
+                                }
+                            } else {
+                                (p.x - bb.min.x) / (bb.max.x - bb.min.x).max(1e-4)
+                            };
+                            let vf = if is_vert {
+                                (bb.max.y - p.y) / y_span
+                            } else {
+                                (p.z - bb.min.z) / (bb.max.z - bb.min.z).max(1e-4)
+                            };
+                            finalize_uv(u0 + (u1 - u0) * uf.clamp(0.0, 1.0), v0 + (v1 - v0) * vf.clamp(0.0, 1.0))
+                        }
+                    } else {
+                        finalize_uv(u_world, v_world)
+                    }
+                };
+                t.uv = map_pt(t.a);
+                t.uv_b = map_pt(t.b);
+                t.uv_c = map_pt(t.c);
+            }
+        }
+        Ok(())
     }
 
     fn parse_vec3_list(&self, s: &str, lineno: usize) -> Result<Vec<Vec3>, String> {
@@ -2422,7 +2820,7 @@ fn is_mesh_op(tok: &str) -> bool {
         tok.to_ascii_lowercase().as_str(),
         "box" | "cube" | "cyl" | "cone" | "cap" | "wdg" | "wedge" | "pyr" | "pyramid"
         | "ico" | "sphere" | "tor" | "torus" | "pri" | "prism" | "lat" | "lathe"
-        | "tub" | "tube" | "lof" | "loft" | "ter" | "terrain" | "tri" | "rib" | "ribbon" | "use" | "grp" | "node"
+        | "tub" | "tube" | "lof" | "loft" | "ter" | "terrain" | "tri" | "quad" | "rib" | "ribbon" | "use" | "grp" | "node"
     )
 }
 
@@ -2482,4 +2880,179 @@ fn split_top_level(s: &str, sep: char) -> Vec<&str> {
         out.push(&s[start..]);
     }
     out
+}
+
+fn transform_quad_uvs(
+    ua: Vec2,
+    ub: Vec2,
+    uc: Vec2,
+    ud: Vec2,
+    flags: &CommonFlags,
+    env: &ExprEnv,
+    lineno: usize,
+) -> Result<(Vec2, Vec2, Vec2, Vec2), String> {
+    let uvs = match flags.extras.get("uvs") {
+        Some(s) => {
+            let v = env.eval_list_f32(s).map_err(|e| format!("line {lineno}: {e}"))?;
+            match v.as_slice() {
+                [a] => Vec2::new(*a, *a),
+                [a, b] => Vec2::new(*a, *b),
+                _ => return Err(format!("line {lineno}: bad uvs='{s}'")),
+            }
+        }
+        None => Vec2::new(1.0, 1.0),
+    };
+    let uvo = match flags.extras.get("uvo") {
+        Some(s) => {
+            let v = env.eval_list_f32(s).map_err(|e| format!("line {lineno}: {e}"))?;
+            if v.len() != 2 {
+                return Err(format!("line {lineno}: bad uvo='{s}'"));
+            }
+            Vec2::new(v[0], v[1])
+        }
+        None => Vec2::ZERO,
+    };
+    let uvr = flags
+        .extras
+        .get("uvr")
+        .map(|s| env.eval_f32(s))
+        .transpose()
+        .map_err(|e| format!("line {lineno}: {e}"))?
+        .unwrap_or(0.0);
+    let rot_steps = ((uvr / 90.0).round() as i32).rem_euclid(4);
+    let mut pts = [ua, ub, uc, ud];
+    for _ in 0..rot_steps {
+        pts = [pts[3], pts[0], pts[1], pts[2]];
+    }
+    for p in &mut pts {
+        p.x = p.x * uvs.x + uvo.x;
+        p.y = p.y * uvs.y + uvo.y;
+    }
+    Ok((pts[0], pts[1], pts[2], pts[3]))
+}
+
+fn rgba_to_rgb(rgba: &[u8]) -> Vec<u8> {
+    let mut rgb = Vec::with_capacity(rgba.len() / 4 * 3);
+    for px in rgba.chunks_exact(4) {
+        rgb.push(px[0]);
+        rgb.push(px[1]);
+        rgb.push(px[2]);
+    }
+    rgb
+}
+
+fn load_tex_material_for_mdl(
+    name: &str,
+    path: &Path,
+    res_override: Option<u32>,
+) -> Result<TexMaterial, String> {
+    let is_tex_dsl = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.eq_ignore_ascii_case("tex"))
+        .unwrap_or(false);
+
+    if is_tex_dsl {
+        let mut spec = load_tex_file(path)?;
+        if let Some(r) = res_override {
+            spec.width = r;
+            spec.height = r;
+        }
+        let baked = bake_texture(&spec, None)?;
+        let bc_png = baked.encode_basecolor_png();
+        let nm_png = baked.encode_normal_png();
+        let orm_png = baked.encode_orm_png();
+
+        let mut bc_rgba = Vec::with_capacity(baked.width * baked.height * 4);
+        for &c in &baked.albedo {
+            let enc = |v: f32| (v.clamp(0.0, 1.0).powf(1.0 / 2.2) * 255.0).round().clamp(0.0, 255.0) as u8;
+            bc_rgba.push(enc(c[0]));
+            bc_rgba.push(enc(c[1]));
+            bc_rgba.push(enc(c[2]));
+            bc_rgba.push(255);
+        }
+        let mut nm_rgb = Vec::with_capacity(baked.width * baked.height * 3);
+        for &n in &baked.normal {
+            let enc = |v: f32| ((v.clamp(-1.0, 1.0) * 0.5 + 0.5) * 255.0).round().clamp(0.0, 255.0) as u8;
+            nm_rgb.push(enc(n[0]));
+            nm_rgb.push(enc(n[1]));
+            nm_rgb.push(enc(n[2].max(0.0)));
+        }
+        let mut orm_rgb = Vec::with_capacity(baked.width * baked.height * 3);
+        for i in 0..(baked.width * baked.height) {
+            orm_rgb.push((baked.ao[i].clamp(0.0, 1.0) * 255.0).round() as u8);
+            orm_rgb.push((baked.roughness[i].clamp(0.0, 1.0) * 255.0).round() as u8);
+            orm_rgb.push((baked.metallic[i].clamp(0.0, 1.0) * 255.0).round() as u8);
+        }
+
+        return Ok(TexMaterial {
+            name: name.to_string(),
+            width: baked.width as u32,
+            height: baked.height as u32,
+            tile_w: baked.tile_w,
+            tile_h: baked.tile_h,
+            basecolor_rgba: bc_rgba,
+            normal_rgb: Some(nm_rgb),
+            orm_rgb: Some(orm_rgb),
+            basecolor_png: bc_png,
+            normal_png: Some(nm_png),
+            orm_png: Some(orm_png),
+        });
+    }
+
+    // Load pre-baked PNG set (`<prefix>_basecolor.png`, optional `_normal.png`, `_orm.png`) or standalone `.png`
+    let p_str = path.to_string_lossy();
+    let (bc_path, nm_path, orm_path) = if p_str.ends_with(".png") {
+        let pref = p_str
+            .strip_suffix("_basecolor.png")
+            .or_else(|| p_str.strip_suffix(".png"))
+            .unwrap_or(&p_str);
+        (
+            path.to_path_buf(),
+            PathBuf::from(format!("{pref}_normal.png")),
+            PathBuf::from(format!("{pref}_orm.png")),
+        )
+    } else {
+        (
+            PathBuf::from(format!("{p_str}_basecolor.png")),
+            PathBuf::from(format!("{p_str}_normal.png")),
+            PathBuf::from(format!("{p_str}_orm.png")),
+        )
+    };
+
+    let bc_png = std::fs::read(&bc_path)
+        .map_err(|e| format!("failed to read texture basecolor '{}': {e}", bc_path.display()))?;
+    let bc_dec = decode_png(&bc_png)?;
+
+    let (nm_png, nm_rgb) = if nm_path.exists() {
+        let bytes = std::fs::read(&nm_path)
+            .map_err(|e| format!("failed to read normal map '{}': {e}", nm_path.display()))?;
+        let dec = decode_png(&bytes)?;
+        (Some(bytes), Some(rgba_to_rgb(&dec.rgba)))
+    } else {
+        (None, None)
+    };
+
+    let (orm_png, orm_rgb) = if orm_path.exists() {
+        let bytes = std::fs::read(&orm_path)
+            .map_err(|e| format!("failed to read ORM map '{}': {e}", orm_path.display()))?;
+        let dec = decode_png(&bytes)?;
+        (Some(bytes), Some(rgba_to_rgb(&dec.rgba)))
+    } else {
+        (None, None)
+    };
+
+    Ok(TexMaterial {
+        name: name.to_string(),
+        width: bc_dec.width,
+        height: bc_dec.height,
+        tile_w: 2.0,
+        tile_h: 2.0,
+        basecolor_rgba: bc_dec.rgba,
+        normal_rgb: nm_rgb,
+        orm_rgb,
+        basecolor_png: bc_png,
+        normal_png: nm_png,
+        orm_png,
+    })
 }

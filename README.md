@@ -105,6 +105,13 @@ Sculpt seamlessly tileable 3D reliefs (`mesh` + beveled `wn=1` `stones`, auto-wr
 | ![Mossy Stone Wall PBR QA](docs/showcase/mossy_stone_wall_qa.png) | ![Medieval Stone Trim Sheet PBR QA](docs/showcase/medieval_stone_trim_qa.png) |
 | [`mossy_stone_wall.tex`](examples/textures/mossy_stone_wall.tex) + [cracks](examples/textures/wall_cracks_chips.svg) / [moss](examples/textures/wall_moss_tufts.svg) | [`medieval_stone_trim.tex`](examples/textures/medieval_stone_trim.tex) + [carved frieze](examples/textures/trim_carvings.svg) |
 
+Bind baked `.tex` recipes or pre-baked PNG sets directly inside `.mdl` (`tex`, named `band` strips, `quad`, and automatic box/cylindrical UV unwrapping) to compile normal-mapped architectural kits with native glTF 2.0 `normalTexture` + `TANGENT` attributes:
+
+| Dungeon Wall Bay, Floor, Trims & Gothic Pillar (1,366 tris, 3 draws — `.mdl` mapped onto `wall` + `trim` above!) |
+| :---: |
+| ![Dungeon Wall Bay and Gothic Pillar](docs/showcase/dungeon_bay_trim.png) |
+| [`dungeon_bay_trim.mdl`](examples/models/dungeon_bay_trim.mdl) (`tex` + `band` + `quad` + normal-mapped `cyl`/`box` + palette torch prop) |
+
 ---
 
 ## Why Dullahan Artisan?

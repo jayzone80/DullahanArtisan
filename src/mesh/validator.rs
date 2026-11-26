@@ -158,27 +158,36 @@ fn validate_parsed(
         }
     }
 
-    // Check materials bind all 3 PBR maps
+    // Track which materials are clamped palette atlases vs repeating PBR texture sets
+    let mut mat_is_palette: Vec<bool> = Vec::new();
     if let Some(mats) = root.get("materials").and_then(|v| v.as_arr()) {
         for (i, m) in mats.iter().enumerate() {
+            let is_pal = m
+                .get("name")
+                .and_then(|v| v.as_str())
+                .map(|s| s.starts_with("palette_"))
+                .unwrap_or(true);
+            mat_is_palette.push(is_pal);
             let pbr = m.get("pbrMetallicRoughness");
             if pbr.and_then(|p| p.get("baseColorTexture")).is_none() {
                 rep.errors.push(format!("material[{i}] missing baseColorTexture"));
             }
-            if pbr.and_then(|p| p.get("metallicRoughnessTexture")).is_none() {
-                rep.errors.push(format!("material[{i}] missing metallicRoughnessTexture"));
-            }
-            if m.get("occlusionTexture").is_none() {
-                rep.errors.push(format!("material[{i}] missing occlusionTexture"));
-            }
-            if m.get("emissiveTexture").is_none() {
-                rep.errors.push(format!("material[{i}] missing emissiveTexture"));
+            if is_pal {
+                if pbr.and_then(|p| p.get("metallicRoughnessTexture")).is_none() {
+                    rep.errors.push(format!("material[{i}] missing metallicRoughnessTexture"));
+                }
+                if m.get("occlusionTexture").is_none() {
+                    rep.errors.push(format!("material[{i}] missing occlusionTexture"));
+                }
+                if m.get("emissiveTexture").is_none() {
+                    rep.errors.push(format!("material[{i}] missing emissiveTexture"));
+                }
             }
         }
     }
 
-    // Check embedded PNG images (base64 data URI or GLB bufferView) and matching dimensions
-    let mut expected_dims: Option<(u32, u32)> = None;
+    // Check embedded PNG images (base64 data URI or GLB bufferView) and matching dimensions on palette trio
+    let mut pal_dims: Option<(u32, u32)> = None;
     if let Some(imgs) = root.get("images").and_then(|v| v.as_arr()) {
         for (i, img) in imgs.iter().enumerate() {
             let png_bytes: Option<Vec<u8>> = if let Some(uri) = img.get("uri").and_then(|u| u.as_str()) {
@@ -205,15 +214,17 @@ fn validate_parsed(
                 match inspect_and_verify_png(&bytes) {
                     Ok(info) => {
                         rep.images_checked += 1;
-                        if let Some((ew, eh)) = expected_dims {
-                            if (info.width, info.height) != (ew, eh) {
-                                rep.errors.push(format!(
-                                    "image[{i}] dims {}x{} != {}x{}",
-                                    info.width, info.height, ew, eh
-                                ));
+                        if i < 3 {
+                            if let Some((ew, eh)) = pal_dims {
+                                if (info.width, info.height) != (ew, eh) {
+                                    rep.errors.push(format!(
+                                        "image[{i}] dims {}x{} != {}x{}",
+                                        info.width, info.height, ew, eh
+                                    ));
+                                }
+                            } else {
+                                pal_dims = Some((info.width, info.height));
                             }
-                        } else {
-                            expected_dims = Some((info.width, info.height));
                         }
                     }
                     Err(e) => rep.errors.push(format!("image[{i}] invalid PNG: {e}")),
@@ -348,16 +359,47 @@ fn validate_parsed(
                     }
                 }
 
-                // UVs in [0,1]
+                // UVs: finite always, and strictly in [0,1] for clamped palette atlas primitives
+                let prim_is_pal = prim
+                    .get("material")
+                    .and_then(|v| v.as_usize())
+                    .and_then(|mi| mat_is_palette.get(mi).copied())
+                    .unwrap_or(true);
                 if let Some(uv_i) = attrs.get("TEXCOORD_0").and_then(|v| v.as_usize()) {
                     let (_, uv_data) = slice_bv(uv_i)?;
                     for k in 0..vcount {
                         let b = &uv_data[k * 8..(k + 1) * 8];
                         let u = f32::from_le_bytes([b[0], b[1], b[2], b[3]]);
                         let v = f32::from_le_bytes([b[4], b[5], b[6], b[7]]);
-                        if !(0.0..=1.0).contains(&u) || !(0.0..=1.0).contains(&v) {
+                        if !u.is_finite() || !v.is_finite() {
+                            rep.errors.push(format!("primitive[{pi}] non-finite UV at {k}"));
+                            break;
+                        }
+                        if prim_is_pal && (!(0.0..=1.0).contains(&u) || !(0.0..=1.0).contains(&v)) {
                             rep.errors.push(format!("primitive[{pi}] UV ({u},{v}) out of [0,1]"));
                             break;
+                        }
+                    }
+                }
+
+                // Optional TANGENT attribute (VEC4: unit xyz + ±1 handedness)
+                if let Some(tan_i) = attrs.get("TANGENT").and_then(|v| v.as_usize()) {
+                    let (tan_acc, tan_data) = slice_bv(tan_i)?;
+                    let tcnt = tan_acc.get("count").and_then(|v| v.as_usize()).unwrap_or(0);
+                    if tcnt != vcount {
+                        rep.errors.push(format!("primitive[{pi}] TANGENT count {tcnt} != {vcount}"));
+                    } else {
+                        for k in 0..vcount {
+                            let b = &tan_data[k * 16..(k + 1) * 16];
+                            let tx = f32::from_le_bytes([b[0], b[1], b[2], b[3]]);
+                            let ty = f32::from_le_bytes([b[4], b[5], b[6], b[7]]);
+                            let tz = f32::from_le_bytes([b[8], b[9], b[10], b[11]]);
+                            let tw = f32::from_le_bytes([b[12], b[13], b[14], b[15]]);
+                            let l = (tx * tx + ty * ty + tz * tz).sqrt();
+                            if !l.is_finite() || (l - 1.0).abs() > 0.03 || (tw.abs() - 1.0).abs() > 0.01 {
+                                rep.errors.push(format!("primitive[{pi}] invalid TANGENT at {k}"));
+                                break;
+                            }
                         }
                     }
                 }

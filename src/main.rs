@@ -1225,6 +1225,8 @@ Note:   #RRGGBBAA with alpha<FF auto-routes triangles into an optional 2nd BLEND
         println!(
             r#"=== MESH (.mdl) — Right-handed Y-up (+X right, +Y up, +Z front, Y=0 ground), CCW outward ===
 Directives: pal <rel.pal> | inc <rel.mdl> (or use <rel.mdl>) | $var = <expr> (+ - * / ^ sin cos tan sind cosd atan2 atan2d sqrt abs min max pi)
+Textures:   tex <name> <path.tex|png_prefix> [tile=2,2] [res=512]   (embeds PBR BaseColor+Normal+ORM + glTF TANGENT!)
+            band <name> <tex_name> <v0..v1|u0,v0,u1,v1>             (named trim-sheet band; use directly as <mat> or uv=<band>!)
 Blocks:     def <name> ... end | grp [@id] [mat] [x,y,z] [flags...] ... end
 ChildNodes: node <name> [x,y,z] [r=rx,ry,rz] [s=sx,sy,sz] [m=...] ... end  (nestable glTF child mesh w/ local pivot!)
 Skeleton:   skel ... end  (alias: rig; exports glTF 2.0 `skins` w/ auto smooth skinning + optional rigid `bone=<name>`)
@@ -1247,7 +1249,7 @@ Metaballs:  sdf [@id] [mat] [x,y,z] [res=28] [sm=1] ... end   (Surface-Nets orga
                        box <x,y,z> <sx,sy,sz> [rnd=r] | cyl <x,y,z> <r,h> [rnd=r] | tor <x,y,z> <R,r>
             SDF ops:   [add|sub|int|paint] <prim> ... [k=0] [r=rx,ry,rz] [m=x|y|z|xz]
 Instance:   use [@id] <name> [x,y,z] [flags...] [ov=old:new,...]
-Materials:  <swatch_name> | cell:c,r | uv:u,v
+Materials:  <swatch_name> | <tex_name> | <band_name> | cell:c,r | uv:u,v
 Primitives (1 line each):
   box [@id] <mat> <x,y,z> <sx,sy,sz>          [t=tx,tz] [o=ox,oz] [bev=b] [fc=...]
   cyl [@id] <mat> <x,y,z> <r,h|rb,rt,h>       [seg=12] [cap=1] [bev=b] [fc=...]   (rt=0 -> cone)
@@ -1262,10 +1264,12 @@ Primitives (1 line each):
   lof [@id] <mat> <x,y,z> <x:y:z/rx:ry[/tw][/mat],...> [seg=10] [ph=0] [cap=1]
   ter [@id] <mat> <x,y,z> <sx,sz>             [sub=8,8] [jit=.08] [mnd=0] [pin=1] [thk=0] [seed=1] [mats=...] [fc=...]
   tri [@id] <mat> <x0:y0:z0> <x1:y1:z1> <x2:y2:z2> [ds=0|1] [off=.001] [fc=...]
+  quad [@id] <mat> <p0> <p1> <p2> <p3>        [uv=u0,v0,u1,v1|band] [uvs=] [uvo=] [uvr=] [ds=0|1]
   rib [@id] <mat> <x,y,z> <w0,w1,h[,curve]>   [seg=4] [ds=1] [off=.001] [fc=...]   (curved tapered blade/ribbon)
 Universal flags:
   r=rx,ry,rz  s=u|sx,sy,sz  a=c|b|t|o (default c for centered, b for rib, o for pri/lat/tub/lof/ter)
   m=x|y|z|xz  sm=0|1|w (crease-aware smooth)  wn=1|2..12 (face-weighted normals for crisp 1-seg bevels!)
+  uv=<band|v0..v1|u0,v0,u1,v1>  uvs=su[,sv]  uvo=ou,ov  uvr=deg  (for PBR tex/band mapped primitives)
   bend=deg:along[:toward]  twist=deg:axis  rep=N:dx,dy,dz[:rx,ry,rz]  rad=N:R[:axis][:startDeg]
   fc=t:m,b:m,s:m,f:m,k:m,l:m,r:m,sl:m
 CLI flags:  --ov old:new[,old2:new2] (repeatable atomic palette swatch swap)  --ext-pal <prefix>

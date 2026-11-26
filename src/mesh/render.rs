@@ -353,31 +353,57 @@ fn shade_pbr(
     normal: Vec3,
     cam_pos: Vec3,
     uv: Vec2,
+    tri: &Triangle,
+    mesh_textures: &[crate::mesh::geom::TexMaterial],
     palette: &Palette,
     shadow: &ShadowMap,
     key_dir: Vec3,
     fill_dir: Vec3,
 ) -> ([f32; 3], f32) {
-    let bc = palette.sample_basecolor_nearest(uv);
-    let orm = palette.sample_orm_nearest(uv);
-    let em = palette.sample_emissive_nearest(uv);
+    let base_n = normal.normalized();
+    let (albedo, alpha, ao, rough, metal, emissive, n) = if let Some(tid) = tri.tex_id {
+        if let Some(tm) = mesh_textures.get(tid as usize) {
+            let bc = tm.sample_basecolor_bilinear(uv.x, uv.y);
+            let orm = tm.sample_orm_bilinear(uv.x, uv.y);
+            let alb = Vec3::new(
+                srgb_to_linear(bc[0]),
+                srgb_to_linear(bc[1]),
+                srgb_to_linear(bc[2]),
+            );
+            let final_n = if let Some(tn) = tm.sample_normal_bilinear(uv.x, uv.y) {
+                let (t_vec, sign) = tri.compute_tangent(base_n);
+                let b_vec = base_n.cross(t_vec) * sign;
+                (t_vec * tn.x + b_vec * tn.y + base_n * tn.z).normalized()
+            } else {
+                base_n
+            };
+            (alb, bc[3], orm[0], orm[1].clamp(0.06, 1.0), orm[2].clamp(0.0, 1.0), Vec3::ZERO, final_n)
+        } else {
+            (Vec3::splat(0.5), 1.0, 1.0, 0.85, 0.0, Vec3::ZERO, base_n)
+        }
+    } else {
+        let bc = palette.sample_basecolor_nearest(uv);
+        let orm = palette.sample_orm_nearest(uv);
+        let em = palette.sample_emissive_nearest(uv);
+        (
+            Vec3::new(
+                srgb_to_linear(bc[0] as f32 / 255.0),
+                srgb_to_linear(bc[1] as f32 / 255.0),
+                srgb_to_linear(bc[2] as f32 / 255.0),
+            ),
+            bc[3] as f32 / 255.0,
+            orm[0],
+            orm[1].clamp(0.06, 1.0),
+            orm[2].clamp(0.0, 1.0),
+            Vec3::new(
+                srgb_to_linear(em[0]),
+                srgb_to_linear(em[1]),
+                srgb_to_linear(em[2]),
+            ),
+            base_n,
+        )
+    };
 
-    let albedo = Vec3::new(
-        srgb_to_linear(bc[0] as f32 / 255.0),
-        srgb_to_linear(bc[1] as f32 / 255.0),
-        srgb_to_linear(bc[2] as f32 / 255.0),
-    );
-    let alpha = bc[3] as f32 / 255.0;
-    let ao = orm[0];
-    let rough = orm[1].clamp(0.06, 1.0);
-    let metal = orm[2].clamp(0.0, 1.0);
-    let emissive = Vec3::new(
-        srgb_to_linear(em[0]),
-        srgb_to_linear(em[1]),
-        srgb_to_linear(em[2]),
-    );
-
-    let n = normal.normalized();
     let v = (cam_pos - world_pos).normalized();
 
     // Bright sunlit studio hemisphere ambient modulated by AO
@@ -553,6 +579,7 @@ pub fn render_view_canvas(mesh: &Mesh, palette: &Palette, opts: &RenderOptions) 
             let cam_ref = &cam;
             let shadow_ref = &shadow;
 
+            let tex_ref = mesh.textures.as_slice();
             scope.spawn(move || {
                 for pt in opaque_ref {
                     if pt.max_y < y_start || pt.min_y >= y_end {
@@ -593,8 +620,12 @@ pub fn render_view_canvas(mesh: &Mesh, palette: &Palette, opts: &RenderOptions) 
                                 d_band[idx] = z;
                                 let wp = pt.tri.a * b0 + pt.tri.b * b1 + pt.tri.c * b2;
                                 let wn = pt.tri.na * b0 + pt.tri.nb * b1 + pt.tri.nc * b2;
+                                let wuv = Vec2::new(
+                                    pt.tri.uv.x * b0 + pt.tri.uv_b.x * b1 + pt.tri.uv_c.x * b2,
+                                    pt.tri.uv.y * b0 + pt.tri.uv_b.y * b1 + pt.tri.uv_c.y * b2,
+                                );
                                 let (rgb, _) = shade_pbr(
-                                    wp, wn, cam_ref.pos, pt.tri.uv, palette, shadow_ref, key_dir, fill_dir,
+                                    wp, wn, cam_ref.pos, wuv, pt.tri, tex_ref, palette, shadow_ref, key_dir, fill_dir,
                                 );
                                 let p = idx * 3;
                                 c_band[p] = rgb[0];
@@ -637,7 +668,13 @@ pub fn render_view_canvas(mesh: &Mesh, palette: &Palette, opts: &RenderOptions) 
                 if z < depth_buf[idx] {
                     let wp = pt.tri.a * b0 + pt.tri.b * b1 + pt.tri.c * b2;
                     let wn = pt.tri.na * b0 + pt.tri.nb * b1 + pt.tri.nc * b2;
-                    let (rgb, alpha) = shade_pbr(wp, wn, cam.pos, pt.tri.uv, palette, &shadow, key_dir, fill_dir);
+                    let wuv = Vec2::new(
+                        pt.tri.uv.x * b0 + pt.tri.uv_b.x * b1 + pt.tri.uv_c.x * b2,
+                        pt.tri.uv.y * b0 + pt.tri.uv_b.y * b1 + pt.tri.uv_c.y * b2,
+                    );
+                    let (rgb, alpha) = shade_pbr(
+                        wp, wn, cam.pos, wuv, pt.tri, mesh.textures.as_slice(), palette, &shadow, key_dir, fill_dir,
+                    );
                     let p = idx * 3;
                     color_buf[p] = rgb[0] * alpha + color_buf[p] * (1.0 - alpha);
                     color_buf[p + 1] = rgb[1] * alpha + color_buf[p + 1] * (1.0 - alpha);

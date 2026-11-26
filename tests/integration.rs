@@ -674,4 +674,22 @@ fn seamless_pbr_texture_and_trim_bake_with_svg_overlay() {
         assert!(inspect_and_verify_png(&baked.encode_orm_png()).is_ok());
         assert!(inspect_and_verify_png(&render_tex_preview_png(&baked, true)).is_ok());
     }
+
+    // Verify `.mdl` binding `.tex` + named `band` strips + `quad` exports valid normalTexture + TANGENT glTF/GLB
+    let (parsed, pal, _) = dullahan_artisan::mesh::parser::load_and_compile_model_with_overrides(
+        Path::new("examples/models/dungeon_bay_trim.mdl"),
+        None,
+        &std::collections::HashMap::new(),
+    )
+    .unwrap();
+    assert_eq!(parsed.mesh.textures.len(), 2);
+    let (gltf, stats) = export_gltf_json(&parsed.mesh, &pal, "dungeon_bay_trim", None).unwrap();
+    assert_eq!(stats.draw_calls, 3);
+    assert!(gltf.contains("\"normalTexture\""));
+    assert!(gltf.contains("\"TANGENT\""));
+    let rep = validate_gltf_json_str(&gltf).unwrap();
+    assert!(rep.is_ok(), "trim-mapped glTF errors: {:?}", rep.errors);
+    let (glb, _) = export_glb(&parsed.mesh, &pal, "dungeon_bay_trim", None).unwrap();
+    let rep_glb = validate_glb_bytes(&glb).unwrap();
+    assert!(rep_glb.is_ok(), "trim-mapped GLB errors: {:?}", rep_glb.errors);
 }

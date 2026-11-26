@@ -1,0 +1,80 @@
+pal ../palette.pal
+# Medieval Dungeon Wall Bay, Stone Floor, Roof/Base Trims & Gothic Pillar
+# Showcases: `.mdl` mapped directly to baked PBR texture sets (`tex`) + named trim-sheet bands (`band`) + `quad` + automatic cylindrical/box UVs + normal maps!
+
+# Reference our procedural 3D-baked PBR texture & trim-sheet recipes (auto-bakes Albedo + Normal + ORM, or point to pre-baked PNG prefix!)
+tex wall ../textures/mossy_stone_wall.tex res=512 tile=2,2
+tex trim ../textures/medieval_stone_trim.tex res=512 tile=2,2
+
+# Named horizontal trim bands on `medieval_stone_trim` (V=0 top -> V=1 bottom)
+band cornice trim 0.00..0.225
+band frieze  trim 0.225..0.45
+band iron    trim 0.46..0.57
+band dado    trim 0.58..0.82
+band plinth  trim 0.825..1.00
+
+# ============================================================================
+# 1. Stone Floor Slab + Front Plinth Edge Trim
+# ============================================================================
+box @floor      wall   0,0.08,0.65    4.20,0.16,2.40  uvs=0.85,0.85
+box @floor_trim plinth 0,0.08,1.90    4.24,0.16,0.14  bev=0.01 wn=1
+
+# ============================================================================
+# 2. Dungeon Back Wall + Floor/Ceiling Architectural Trims (Box + Quad Strips)
+# ============================================================================
+# Mossy stone floor plinth & chamfered ashlar dado
+box  @wall_plinth plinth  0,0.34,-0.46   4.12,0.36,0.28  bev=0.015 wn=1
+box  @wall_dado   dado    0,0.74,-0.50   4.06,0.46,0.22  bev=0.012 wn=1
+
+# Forged iron & brass-riveted horizontal strap — front face authored as an exact UV-mapped `quad` strip!
+box  @strap_body  iron    0,1.09,-0.51   4.08,0.24,0.22  bev=0.008 wn=1
+quad @strap_face  iron   -2.03:0.97:-0.395 2.03:0.97:-0.395 2.03:1.21:-0.395 -2.03:1.21:-0.395
+
+# Main mossy medieval stone wall course (normal-mapped bricks, moss & carved cracks!)
+box  @wall_main   wall    0,2.02,-0.54   4.00,1.62,0.22
+
+# Sculpted gothic bas-relief frieze & overhanging roof dentil cornice
+box  @wall_frieze frieze  0,3.02,-0.46   4.10,0.46,0.30  bev=0.012 wn=1
+box  @roof_trim   cornice 0,3.44,-0.32   4.24,0.42,0.58  bev=0.018 wn=1
+box  @roof_slab   wall    0,3.70,-0.20   4.28,0.12,0.86  uvs=0.85,0.85
+
+# Left engaged wall pilaster framing the bay
+box  @pil_base    plinth -1.78,0.34,-0.26 0.62,0.36,0.36 bev=0.015 wn=1
+box  @pil_shaft   wall   -1.78,1.76,-0.32 0.50,2.48,0.28 bev=0.015 wn=1
+box  @pil_strap   iron   -1.78,1.09,-0.31 0.54,0.24,0.31 bev=0.008 wn=1
+box  @pil_cap     cornice -1.78,3.18,-0.26 0.64,0.36,0.40 bev=0.015 wn=1
+
+# ============================================================================
+# 3. Freestanding Gothic Stone Pillar (Cylindrical + Trim-Band Normal Mapped!)
+# ============================================================================
+grp @pillar 1.05,0,0.82
+  # Heavy mossy plinth + stepped ashlar pedestal
+  box plinth  0,0.28,0    0.88,0.26,0.88  bev=0.020 wn=1
+  box dado    0,0.53,0    0.72,0.26,0.72  bev=0.018 wn=1
+  # Lower forged iron & brass-riveted collar band wrapping 360 deg seamlessly!
+  cyl iron    0,0.77,0    0.34,0.34,0.24  seg=20 sm=1
+  # Tall mossy stone column shaft (seamless 360 deg stone wrap!)
+  cyl wall    0,1.88,0    0.30,0.28,2.00  seg=20 sm=1
+  # Mid-shaft iron & verdigris copper strapping band
+  cyl iron    0,1.90,0    0.315,0.315,0.22 seg=20 sm=1
+  # Flared carved gothic frieze capital
+  cyl frieze  0,3.02,0    0.29,0.37,0.40  seg=20 sm=1
+  # Heavy cantilevered cornice abacus supporting the ceiling beam
+  box cornice 0,3.42,0    0.92,0.42,0.92  bev=0.020 wn=1
+end
+
+# ============================================================================
+# 4. Palette-Atlas Props (Overhead Timber Beam + Forged Iron Torch Sconce!)
+# ============================================================================
+box @beam       wood_dark  1.05,3.44,0.16 0.34,0.24,1.36  bev=0.018 wn=1
+box @beam_brace wood_oak   1.05,3.14,0.36 0.22,0.16,0.62  r=42,0,0 bev=0.012 wn=1
+
+# Mounted iron wall torch sconce casting warm fantasy contrast against mossy stone
+grp @torch -0.45,2.08,-0.36
+  box iron_dark   0,0,-0.04     0.12,0.28,0.04 bev=0.008 wn=1
+  cyl iron_dark   0,-0.02,0.06  0.024,0.024,0.18 r=72,0,0 seg=8
+  cyl iron_dark   0,0.08,0.15   0.045,0.068,0.14 seg=10 bev=0.006 wn=1
+  cyl wood_dark   0,-0.05,0.15  0.024,0.028,0.28 seg=8
+  ico amber_glow  0,0.20,0.15   0.062 sub=1 jit=0.18 sm=1 seed=9
+  ico beacon_gold 0,0.24,0.15   0.040 sub=1 jit=0.15 sm=1 seed=17
+end

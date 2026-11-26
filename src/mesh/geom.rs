@@ -6,6 +6,117 @@ use crate::mesh::morph::{apply_morph_targets, MorphTarget};
 use crate::mesh::palette::ResolvedMat;
 use crate::mesh::skel::Bone;
 
+#[derive(Debug, Clone)]
+pub struct TexMaterial {
+    pub name: String,
+    pub width: u32,
+    pub height: u32,
+    pub tile_w: f32,
+    pub tile_h: f32,
+    pub basecolor_rgba: Vec<u8>,
+    pub normal_rgb: Option<Vec<u8>>,
+    pub orm_rgb: Option<Vec<u8>>,
+    pub basecolor_png: Vec<u8>,
+    pub normal_png: Option<Vec<u8>>,
+    pub orm_png: Option<Vec<u8>>,
+}
+
+impl TexMaterial {
+    #[inline]
+    fn bilinear_coords(&self, u: f32, v: f32) -> (usize, usize, usize, usize, f32, f32) {
+        let w = self.width.max(1) as usize;
+        let h = self.height.max(1) as usize;
+        let fx = u.rem_euclid(1.0) * w as f32 - 0.5;
+        let fy = v.rem_euclid(1.0) * h as f32 - 0.5;
+        let x0i = fx.floor() as isize;
+        let y0i = fy.floor() as isize;
+        let tx = fx - x0i as f32;
+        let ty = fy - y0i as f32;
+        let x0 = x0i.rem_euclid(w as isize) as usize;
+        let x1 = (x0i + 1).rem_euclid(w as isize) as usize;
+        let y0 = y0i.rem_euclid(h as isize) as usize;
+        let y1 = (y0i + 1).rem_euclid(h as isize) as usize;
+        (x0, x1, y0, y1, tx, ty)
+    }
+
+    pub fn sample_basecolor_bilinear(&self, u: f32, v: f32) -> [f32; 4] {
+        let w = self.width.max(1) as usize;
+        let (x0, x1, y0, y1, tx, ty) = self.bilinear_coords(u, v);
+        let px = |x: usize, y: usize| {
+            let p = (y * w + x) * 4;
+            [
+                self.basecolor_rgba[p] as f32 / 255.0,
+                self.basecolor_rgba[p + 1] as f32 / 255.0,
+                self.basecolor_rgba[p + 2] as f32 / 255.0,
+                self.basecolor_rgba[p + 3] as f32 / 255.0,
+            ]
+        };
+        let c00 = px(x0, y0);
+        let c10 = px(x1, y0);
+        let c01 = px(x0, y1);
+        let c11 = px(x1, y1);
+        let mut out = [0.0f32; 4];
+        for k in 0..4 {
+            let a = c00[k] + (c10[k] - c00[k]) * tx;
+            let b = c01[k] + (c11[k] - c01[k]) * tx;
+            out[k] = a + (b - a) * ty;
+        }
+        out
+    }
+
+    pub fn sample_orm_bilinear(&self, u: f32, v: f32) -> [f32; 3] {
+        let Some(ref orm) = self.orm_rgb else {
+            return [1.0, 0.85, 0.0];
+        };
+        let w = self.width.max(1) as usize;
+        let (x0, x1, y0, y1, tx, ty) = self.bilinear_coords(u, v);
+        let px = |x: usize, y: usize| {
+            let p = (y * w + x) * 3;
+            [
+                orm[p] as f32 / 255.0,
+                orm[p + 1] as f32 / 255.0,
+                orm[p + 2] as f32 / 255.0,
+            ]
+        };
+        let c00 = px(x0, y0);
+        let c10 = px(x1, y0);
+        let c01 = px(x0, y1);
+        let c11 = px(x1, y1);
+        let mut out = [0.0f32; 3];
+        for k in 0..3 {
+            let a = c00[k] + (c10[k] - c00[k]) * tx;
+            let b = c01[k] + (c11[k] - c01[k]) * tx;
+            out[k] = a + (b - a) * ty;
+        }
+        out
+    }
+
+    pub fn sample_normal_bilinear(&self, u: f32, v: f32) -> Option<Vec3> {
+        let nrm = self.normal_rgb.as_ref()?;
+        let w = self.width.max(1) as usize;
+        let (x0, x1, y0, y1, tx, ty) = self.bilinear_coords(u, v);
+        let px = |x: usize, y: usize| {
+            let p = (y * w + x) * 3;
+            [
+                nrm[p] as f32 / 255.0 * 2.0 - 1.0,
+                nrm[p + 1] as f32 / 255.0 * 2.0 - 1.0,
+                nrm[p + 2] as f32 / 255.0 * 2.0 - 1.0,
+            ]
+        };
+        let c00 = px(x0, y0);
+        let c10 = px(x1, y0);
+        let c01 = px(x0, y1);
+        let c11 = px(x1, y1);
+        let mut out = [0.0f32; 3];
+        for k in 0..3 {
+            let a = c00[k] + (c10[k] - c00[k]) * tx;
+            let b = c01[k] + (c11[k] - c01[k]) * tx;
+            out[k] = a + (b - a) * ty;
+        }
+        Some(Vec3::new(out[0], out[1], out[2].max(0.05)).normalized())
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct Triangle {
     pub a: Vec3,
@@ -16,11 +127,46 @@ pub struct Triangle {
     pub nc: Vec3,
     pub face_normal: Vec3,
     pub uv: Vec2,
+    pub uv_b: Vec2,
+    pub uv_c: Vec2,
     pub is_translucent: bool,
+    /// Optional external/baked PBR texture material index into `Mesh.textures` (`None` = shared palette atlas).
+    pub tex_id: Option<u16>,
     /// Optional explicit rigid bone index (`bone=<name>`); `None` uses automatic smooth skinning when rigged.
     pub rigid_bone: Option<u16>,
     /// Optional `@part` tag index into `Mesh.tag_names` (used by `morph` blend-shape targeting).
     pub part_tag: Option<u16>,
+}
+
+impl Triangle {
+    /// Compute tangent vector + glTF handedness sign (`+1` or `-1`) for normal mapping.
+    /// Tangent points along +U, bitangent `sign * (N x T)` points along +V (downward in PNG, matching OpenGL +Y normal maps via `-B`).
+    pub fn compute_tangent(&self, n: Vec3) -> (Vec3, f32) {
+        let e1 = self.b - self.a;
+        let e2 = self.c - self.a;
+        let du1 = self.uv_b.x - self.uv.x;
+        let dv1 = self.uv_b.y - self.uv.y;
+        let du2 = self.uv_c.x - self.uv.x;
+        let dv2 = self.uv_c.y - self.uv.y;
+        let det = du1 * dv2 - du2 * dv1;
+        if det.abs() > 1e-8 {
+            let inv = 1.0 / det;
+            let t_raw = (e1 * dv2 - e2 * dv1) * inv;
+            let b_raw = (e2 * du1 - e1 * du2) * inv;
+            // Gram-Schmidt orthogonalize tangent against vertex normal `n`
+            let t_orth = t_raw - n * n.dot(t_raw);
+            if t_orth.len_sq() > 1e-10 {
+                let t = t_orth.normalized();
+                // OpenGL/MikkTSpace tangent frame: B = sign * (N x T) aligns with -V (+Y up in PNG normal map)
+                let sign = if n.cross(t).dot(-b_raw) < 0.0 { -1.0 } else { 1.0 };
+                return (t, sign);
+            }
+        }
+        // Fallback orthonormal tangent for degenerate/constant UVs
+        let ref_v = if n.y.abs() < 0.9 { Vec3::Y } else { Vec3::X };
+        let t = ref_v.cross(n).normalized();
+        (t, 1.0)
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -56,6 +202,8 @@ pub struct Mesh {
     pub morphs: Vec<MorphTarget>,
     /// Interned `@id` tag names indexed by `Triangle.part_tag`.
     pub tag_names: Vec<String>,
+    /// Optional baked/external PBR texture materials (`tex <name> <path>`) indexed by `Triangle.tex_id`.
+    pub textures: Vec<TexMaterial>,
 }
 
 impl Mesh {
@@ -88,7 +236,45 @@ impl Mesh {
             nc: n,
             face_normal: n,
             uv: mat.uv,
+            uv_b: mat.uv,
+            uv_c: mat.uv,
             is_translucent: mat.is_translucent,
+            tex_id: None,
+            rigid_bone: None,
+            part_tag: None,
+        });
+    }
+
+    pub fn add_tri_uv(
+        &mut self,
+        a: Vec3,
+        b: Vec3,
+        c: Vec3,
+        ua: Vec2,
+        ub: Vec2,
+        uc: Vec2,
+        tex_id: Option<u16>,
+        is_translucent: bool,
+    ) {
+        let cross = (b - a).cross(c - a);
+        let area2 = cross.len();
+        if area2 < 1e-10 {
+            return;
+        }
+        let n = cross / area2;
+        self.tris.push(Triangle {
+            a,
+            b,
+            c,
+            na: n,
+            nb: n,
+            nc: n,
+            face_normal: n,
+            uv: ua,
+            uv_b: ub,
+            uv_c: uc,
+            is_translucent,
+            tex_id,
             rigid_bone: None,
             part_tag: None,
         });
@@ -98,6 +284,24 @@ impl Mesh {
     pub fn add_quad(&mut self, a: Vec3, b: Vec3, c: Vec3, d: Vec3, mat: ResolvedMat) {
         self.add_tri(a, b, c, mat);
         self.add_tri(a, c, d, mat);
+    }
+
+    /// Outward-CCW quad with explicit per-vertex UVs `(ua, ub, uc, ud)`.
+    pub fn add_quad_uv(
+        &mut self,
+        a: Vec3,
+        b: Vec3,
+        c: Vec3,
+        d: Vec3,
+        ua: Vec2,
+        ub: Vec2,
+        uc: Vec2,
+        ud: Vec2,
+        tex_id: Option<u16>,
+        is_translucent: bool,
+    ) {
+        self.add_tri_uv(a, b, c, ua, ub, uc, tex_id, is_translucent);
+        self.add_tri_uv(a, c, d, ua, uc, ud, tex_id, is_translucent);
     }
 
     pub fn compute_bounds(&self) -> Aabb {
@@ -162,6 +366,7 @@ impl Mesh {
             bones: self.bones.clone(),
             morphs: Vec::new(),
             tag_names: Vec::new(),
+            textures: self.textures.clone(),
         };
         fn append_node(node: &ChildNodeMesh, parent: Mat4, out: &mut Mesh) {
             let mat = parent.mul(Mat4::from_trs(node.translation, node.rotation_deg, node.scale));
@@ -195,13 +400,17 @@ impl Mesh {
     /// which keeps flat cylinder caps crisp and mathematically prevents inverted vertex normals on beveled frustums.
     pub fn compute_smooth_normals(&mut self) {
         const COS_CREASE: f32 = 0.25; // ~75.5 deg: smooths seg>=5 cyls & 45 deg bevels, keeps 90+ deg caps/creases crisp
-        let quant = |p: Vec3, uv: Vec2| -> (i32, i32, i32, i32, i32) {
+        let quant = |p: Vec3, t: &Triangle| -> (i32, i32, i32, i32, i32) {
+            let (k0, k1) = match t.tex_id {
+                Some(id) => (-(id as i32) - 1, -1),
+                None => ((t.uv.x * 10000.0).round() as i32, (t.uv.y * 10000.0).round() as i32),
+            };
             (
                 (p.x * 10000.0).round() as i32,
                 (p.y * 10000.0).round() as i32,
                 (p.z * 10000.0).round() as i32,
-                (uv.x * 10000.0).round() as i32,
-                (uv.y * 10000.0).round() as i32,
+                k0,
+                k1,
             )
         };
         let mut buckets: HashMap<(i32, i32, i32, i32, i32), Vec<(Vec3, Vec3)>> = HashMap::new();
@@ -212,7 +421,7 @@ impl Mesh {
                 continue;
             }
             for p in [t.a, t.b, t.c] {
-                buckets.entry(quant(p, t.uv)).or_default().push((weighted, fn_u));
+                buckets.entry(quant(p, t)).or_default().push((weighted, fn_u));
             }
         }
         for t in &mut self.tris {
@@ -220,8 +429,8 @@ impl Mesh {
             let face_n = if fn_u.len_sq() > 0.5 { fn_u } else { t.face_normal };
             t.face_normal = face_n;
 
-            let smooth_at = |p: Vec3| -> Vec3 {
-                let k = quant(p, t.uv);
+            let smooth_at = |p: Vec3, t_ref: &Triangle| -> Vec3 {
+                let k = quant(p, t_ref);
                 let mut sum = Vec3::ZERO;
                 if let Some(entries) = buckets.get(&k) {
                     for &(w, n_other) in entries {
@@ -238,9 +447,10 @@ impl Mesh {
                 }
             };
 
-            t.na = smooth_at(t.a);
-            t.nb = smooth_at(t.b);
-            t.nc = smooth_at(t.c);
+            let t_copy = *t;
+            t.na = smooth_at(t.a, &t_copy);
+            t.nb = smooth_at(t.b, &t_copy);
+            t.nc = smooth_at(t.c, &t_copy);
         }
     }
 
@@ -384,35 +594,39 @@ impl Mesh {
                     next.push(*t);
                     continue;
                 }
-                // Split polygon (triangle) into below-plane and above-plane convex pieces (preserving CCW winding)
-                let mut below: Vec<(Vec3, Vec3)> = Vec::with_capacity(4);
-                let mut above: Vec<(Vec3, Vec3)> = Vec::with_capacity(4);
+                // Split polygon (triangle) into below-plane and above-plane convex pieces (preserving CCW winding & UVs)
+                let uvs = [t.uv, t.uv_b, t.uv_c];
+                let mut below: Vec<(Vec3, Vec3, Vec2)> = Vec::with_capacity(4);
+                let mut above: Vec<(Vec3, Vec3, Vec2)> = Vec::with_capacity(4);
                 for i in 0..3 {
                     let j = (i + 1) % 3;
                     let (p0, n0) = verts[i];
                     let (p1, n1) = verts[j];
+                    let uv0 = uvs[i];
+                    let uv1 = uvs[j];
                     let d0 = d[i];
                     let d1 = d[j];
                     if d0 <= 1e-6 {
-                        below.push((p0, n0));
+                        below.push((p0, n0, uv0));
                     }
                     if d0 >= -1e-6 {
-                        above.push((p0, n0));
+                        above.push((p0, n0, uv0));
                     }
                     if (d0 < -1e-6 && d1 > 1e-6) || (d0 > 1e-6 && d1 < -1e-6) {
                         let u = d0 / (d0 - d1);
                         let pm = p0.lerp(p1, u);
                         let nm = n0.lerp(n1, u).normalized();
-                        below.push((pm, nm));
-                        above.push((pm, nm));
+                        let uvm = Vec2::new(uv0.x + (uv1.x - uv0.x) * u, uv0.y + (uv1.y - uv0.y) * u);
+                        below.push((pm, nm, uvm));
+                        above.push((pm, nm, uvm));
                     }
                 }
                 for poly in [&below, &above] {
                     if poly.len() >= 3 {
                         for m in 1..(poly.len() - 1) {
-                            let (pa, na) = poly[0];
-                            let (pb, nb) = poly[m];
-                            let (pc, nc) = poly[m + 1];
+                            let (pa, na, uva) = poly[0];
+                            let (pb, nb, uvb) = poly[m];
+                            let (pc, nc, uvc) = poly[m + 1];
                             let fn_v = (pb - pa).cross(pc - pa).normalized();
                             if fn_v.len_sq() > 0.5 {
                                 next.push(Triangle {
@@ -423,8 +637,11 @@ impl Mesh {
                                     nb,
                                     nc,
                                     face_normal: fn_v,
-                                    uv: t.uv,
+                                    uv: uva,
+                                    uv_b: uvb,
+                                    uv_c: uvc,
                                     is_translucent: t.is_translucent,
+                                    tex_id: t.tex_id,
                                     rigid_bone: t.rigid_bone,
                                     part_tag: t.part_tag,
                                 });
@@ -538,7 +755,7 @@ impl Mesh {
             let pb = mat.transform_point(t.b);
             let pc = mat.transform_point(t.c);
 
-            let (a, b, c, na, nb, nc) = if flip {
+            let (a, b, c, na, nb, nc, ua, ub, uc) = if flip {
                 (
                     pa,
                     pc,
@@ -546,6 +763,9 @@ impl Mesh {
                     mat.transform_normal(t.na),
                     mat.transform_normal(t.nc),
                     mat.transform_normal(t.nb),
+                    t.uv,
+                    t.uv_c,
+                    t.uv_b,
                 )
             } else {
                 (
@@ -555,6 +775,9 @@ impl Mesh {
                     mat.transform_normal(t.na),
                     mat.transform_normal(t.nb),
                     mat.transform_normal(t.nc),
+                    t.uv,
+                    t.uv_b,
+                    t.uv_c,
                 )
             };
 
@@ -575,8 +798,11 @@ impl Mesh {
                 nb: if nb.len_sq() > 0.5 { nb } else { face_n },
                 nc: if nc.len_sq() > 0.5 { nc } else { face_n },
                 face_normal: face_n,
-                uv: t.uv,
+                uv: ua,
+                uv_b: ub,
+                uv_c: uc,
                 is_translucent: t.is_translucent,
+                tex_id: t.tex_id,
                 rigid_bone: t.rigid_bone,
                 part_tag: t
                     .part_tag

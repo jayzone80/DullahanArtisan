@@ -92,6 +92,7 @@ fn pad4(buf: &mut Vec<u8>) {
 
 fn append_primitive_buffers(
     tris: &[&Triangle],
+    include_tangents: bool,
     skins: Option<&[[VertexSkin; 3]]>,
     morph_deltas: Option<&[(Vec<[Vec3; 3]>, Vec<[Vec3; 3]>)]>,
     bin: &mut Vec<u8>,
@@ -102,10 +103,11 @@ fn append_primitive_buffers(
     let mut pos_bytes = Vec::with_capacity(vert_count * 12);
     let mut norm_bytes = Vec::with_capacity(vert_count * 12);
     let mut uv_bytes = Vec::with_capacity(vert_count * 8);
+    let mut tan_bytes = if include_tangents { Vec::with_capacity(vert_count * 16) } else { Vec::new() };
     let mut bb = Aabb::empty();
 
     for t in tris {
-        for (p, n) in [(t.a, t.na), (t.b, t.nb), (t.c, t.nc)] {
+        for (p, n, uv) in [(t.a, t.na, t.uv), (t.b, t.nb, t.uv_b), (t.c, t.nc, t.uv_c)] {
             bb.expand(p);
             pos_bytes.extend_from_slice(&p.x.to_le_bytes());
             pos_bytes.extend_from_slice(&p.y.to_le_bytes());
@@ -114,8 +116,15 @@ fn append_primitive_buffers(
             norm_bytes.extend_from_slice(&nn.x.to_le_bytes());
             norm_bytes.extend_from_slice(&nn.y.to_le_bytes());
             norm_bytes.extend_from_slice(&nn.z.to_le_bytes());
-            uv_bytes.extend_from_slice(&t.uv.x.to_le_bytes());
-            uv_bytes.extend_from_slice(&t.uv.y.to_le_bytes());
+            uv_bytes.extend_from_slice(&uv.x.to_le_bytes());
+            uv_bytes.extend_from_slice(&uv.y.to_le_bytes());
+            if include_tangents {
+                let (tv, sgn) = t.compute_tangent(nn);
+                tan_bytes.extend_from_slice(&tv.x.to_le_bytes());
+                tan_bytes.extend_from_slice(&tv.y.to_le_bytes());
+                tan_bytes.extend_from_slice(&tv.z.to_le_bytes());
+                tan_bytes.extend_from_slice(&sgn.to_le_bytes());
+            }
         }
     }
 
@@ -228,6 +237,27 @@ fn append_primitive_buffers(
         ("NORMAL", JsonVal::Int(norm_acc as i64)),
         ("TEXCOORD_0", JsonVal::Int(uv_acc as i64)),
     ];
+
+    if include_tangents {
+        pad4(bin);
+        let tan_off = bin.len();
+        bin.extend_from_slice(&tan_bytes);
+        let tan_bv = buffer_views.len();
+        buffer_views.push(obj(vec![
+            ("buffer", JsonVal::Int(0)),
+            ("byteOffset", JsonVal::Int(tan_off as i64)),
+            ("byteLength", JsonVal::Int(tan_bytes.len() as i64)),
+            ("target", JsonVal::Int(34962)),
+        ]));
+        let tan_acc = accessors.len();
+        accessors.push(obj(vec![
+            ("bufferView", JsonVal::Int(tan_bv as i64)),
+            ("componentType", JsonVal::Int(5126)),
+            ("count", JsonVal::Int(vert_count as i64)),
+            ("type", JsonVal::Str("VEC4".into())),
+        ]));
+        attr_fields.push(("TANGENT", JsonVal::Int(tan_acc as i64)));
+    }
 
     if let Some(sk) = skins {
         let mut j_bytes = Vec::with_capacity(vert_count * 8);
@@ -505,22 +535,85 @@ fn build_gltf_payload(
         return Err("cannot export empty mesh (0 triangles)".into());
     }
 
-    fn node_has_opaque(n: &ChildNodeMesh) -> bool {
-        n.tris.iter().any(|t| !t.is_translucent) || n.children.iter().any(node_has_opaque)
+    fn node_has_pal_opaque(n: &ChildNodeMesh) -> bool {
+        n.tris.iter().any(|t| t.tex_id.is_none() && !t.is_translucent)
+            || n.children.iter().any(node_has_pal_opaque)
     }
-    fn node_has_trans(n: &ChildNodeMesh) -> bool {
-        n.tris.iter().any(|t| t.is_translucent) || n.children.iter().any(node_has_trans)
+    fn node_has_pal_trans(n: &ChildNodeMesh) -> bool {
+        n.tris.iter().any(|t| t.tex_id.is_none() && t.is_translucent)
+            || n.children.iter().any(node_has_pal_trans)
     }
-    let any_opaque = mesh.tris.iter().any(|t| !t.is_translucent)
-        || mesh.nodes.iter().any(node_has_opaque)
+    let any_pal_opaque = mesh.tris.iter().any(|t| t.tex_id.is_none() && !t.is_translucent)
+        || mesh.nodes.iter().any(node_has_pal_opaque)
         || mesh.colliders.iter().any(|c| !c.tris.is_empty());
-    let has_translucent = mesh.tris.iter().any(|t| t.is_translucent)
-        || mesh.nodes.iter().any(node_has_trans);
+    let has_translucent = mesh.tris.iter().any(|t| t.tex_id.is_none() && t.is_translucent)
+        || mesh.nodes.iter().any(node_has_pal_trans);
 
     let mut bin: Vec<u8> = Vec::new();
     let mut buffer_views: Vec<JsonVal> = Vec::new();
     let mut accessors: Vec<JsonVal> = Vec::new();
     let mut materials: Vec<JsonVal> = Vec::new();
+    let mut images: Vec<JsonVal> = Vec::new();
+    let mut gltf_textures: Vec<JsonVal> = Vec::new();
+    let mut gltf_samplers: Vec<JsonVal> = vec![obj(vec![
+        ("magFilter", JsonVal::Int(9728)),
+        ("minFilter", JsonVal::Int(9728)),
+        ("wrapS", JsonVal::Int(33071)),
+        ("wrapT", JsonVal::Int(33071)),
+    ])];
+
+    // 3 Palette Atlas images & textures (indices 0, 1, 2)
+    if let Some(prefix) = external_palette_prefix {
+        images.push(obj(vec![
+            ("name", JsonVal::Str("palette_basecolor".into())),
+            ("uri", JsonVal::Str(format!("{prefix}_basecolor.png"))),
+        ]));
+        images.push(obj(vec![
+            ("name", JsonVal::Str("palette_orm".into())),
+            ("uri", JsonVal::Str(format!("{prefix}_orm.png"))),
+        ]));
+        images.push(obj(vec![
+            ("name", JsonVal::Str("palette_emissive".into())),
+            ("uri", JsonVal::Str(format!("{prefix}_emissive.png"))),
+        ]));
+    } else {
+        let pngs = [
+            ("palette_basecolor", palette.encode_basecolor_png()),
+            ("palette_orm", palette.encode_orm_png()),
+            ("palette_emissive", palette.encode_emissive_png()),
+        ];
+        for (img_name, bytes) in pngs {
+            if is_glb {
+                pad4(&mut bin);
+                let off = bin.len();
+                bin.extend_from_slice(&bytes);
+                let bv = buffer_views.len();
+                buffer_views.push(obj(vec![
+                    ("buffer", JsonVal::Int(0)),
+                    ("byteOffset", JsonVal::Int(off as i64)),
+                    ("byteLength", JsonVal::Int(bytes.len() as i64)),
+                ]));
+                images.push(obj(vec![
+                    ("name", JsonVal::Str(img_name.into())),
+                    ("mimeType", JsonVal::Str("image/png".into())),
+                    ("bufferView", JsonVal::Int(bv as i64)),
+                ]));
+            } else {
+                let uri = format!("data:image/png;base64,{}", base64::encode(&bytes));
+                images.push(obj(vec![
+                    ("name", JsonVal::Str(img_name.into())),
+                    ("mimeType", JsonVal::Str("image/png".into())),
+                    ("uri", JsonVal::Str(uri)),
+                ]));
+            }
+        }
+    }
+    for src_i in 0..3 {
+        gltf_textures.push(obj(vec![
+            ("sampler", JsonVal::Int(0)),
+            ("source", JsonVal::Int(src_i)),
+        ]));
+    }
 
     let make_mat = |mat_name: &str, alpha_mode: &str| -> JsonVal {
         obj(vec![
@@ -556,7 +649,7 @@ fn build_gltf_payload(
         ])
     };
 
-    let opaque_mat_idx = if any_opaque {
+    let opaque_mat_idx = if any_pal_opaque {
         let idx = materials.len();
         materials.push(make_mat("palette_opaque", "OPAQUE"));
         Some(idx)
@@ -571,6 +664,102 @@ fn build_gltf_payload(
         None
     };
 
+    // Emit PBR textures & materials for any `tex <name> ...` materials referenced by the mesh!
+    let mut tex_mat_indices: Vec<(usize, bool)> = Vec::new(); // (material_idx, has_normal_map)
+    if !mesh.textures.is_empty() {
+        let pbr_sampler = gltf_samplers.len() as i64;
+        gltf_samplers.push(obj(vec![
+            ("magFilter", JsonVal::Int(9729)), // LINEAR
+            ("minFilter", JsonVal::Int(9987)), // LINEAR_MIPMAP_LINEAR
+            ("wrapS", JsonVal::Int(10497)),    // REPEAT
+            ("wrapT", JsonVal::Int(10497)),    // REPEAT
+        ]));
+
+        let mut push_png_tex = |img_name: String, bytes: &[u8]| -> i64 {
+            let img_idx = images.len() as i64;
+            if is_glb {
+                pad4(&mut bin);
+                let off = bin.len();
+                bin.extend_from_slice(bytes);
+                let bv = buffer_views.len();
+                buffer_views.push(obj(vec![
+                    ("buffer", JsonVal::Int(0)),
+                    ("byteOffset", JsonVal::Int(off as i64)),
+                    ("byteLength", JsonVal::Int(bytes.len() as i64)),
+                ]));
+                images.push(obj(vec![
+                    ("name", JsonVal::Str(img_name)),
+                    ("mimeType", JsonVal::Str("image/png".into())),
+                    ("bufferView", JsonVal::Int(bv as i64)),
+                ]));
+            } else {
+                let uri = format!("data:image/png;base64,{}", base64::encode(bytes));
+                images.push(obj(vec![
+                    ("name", JsonVal::Str(img_name)),
+                    ("mimeType", JsonVal::Str("image/png".into())),
+                    ("uri", JsonVal::Str(uri)),
+                ]));
+            }
+            let tex_idx = gltf_textures.len() as i64;
+            gltf_textures.push(obj(vec![
+                ("sampler", JsonVal::Int(pbr_sampler)),
+                ("source", JsonVal::Int(img_idx)),
+            ]));
+            tex_idx
+        };
+
+        for tm in &mesh.textures {
+            let bc_tex = push_png_tex(format!("{}_basecolor", tm.name), &tm.basecolor_png);
+            let orm_tex = tm
+                .orm_png
+                .as_ref()
+                .map(|b| push_png_tex(format!("{}_orm", tm.name), b));
+            let nm_tex = tm
+                .normal_png
+                .as_ref()
+                .map(|b| push_png_tex(format!("{}_normal", tm.name), b));
+
+            let mut pbr_fields = vec![
+                (
+                    "baseColorFactor",
+                    JsonVal::Arr(vec![
+                        JsonVal::Num(1.0),
+                        JsonVal::Num(1.0),
+                        JsonVal::Num(1.0),
+                        JsonVal::Num(1.0),
+                    ]),
+                ),
+                ("baseColorTexture", obj(vec![("index", JsonVal::Int(bc_tex))])),
+            ];
+            if let Some(ot) = orm_tex {
+                pbr_fields.push(("metallicFactor", JsonVal::Num(1.0)));
+                pbr_fields.push(("roughnessFactor", JsonVal::Num(1.0)));
+                pbr_fields.push(("metallicRoughnessTexture", obj(vec![("index", JsonVal::Int(ot))])));
+            } else {
+                pbr_fields.push(("metallicFactor", JsonVal::Num(0.0)));
+                pbr_fields.push(("roughnessFactor", JsonVal::Num(0.85)));
+            }
+
+            let mut mf = vec![
+                ("name", JsonVal::Str(tm.name.clone())),
+                ("alphaMode", JsonVal::Str("OPAQUE".into())),
+                ("pbrMetallicRoughness", obj(pbr_fields)),
+            ];
+            if let Some(ot) = orm_tex {
+                mf.push((
+                    "occlusionTexture",
+                    obj(vec![("index", JsonVal::Int(ot)), ("strength", JsonVal::Num(1.0))]),
+                ));
+            }
+            if let Some(nt) = nm_tex {
+                mf.push(("normalTexture", obj(vec![("index", JsonVal::Int(nt))])));
+            }
+            let mi = materials.len();
+            materials.push(obj(mf));
+            tex_mat_indices.push((mi, nm_tex.is_some()));
+        }
+    }
+
     let mut build_prims = |tris: &[Triangle],
                            all_skins: Option<&[[VertexSkin; 3]]>,
                            morphs: Option<&[MorphTarget]>|
@@ -581,7 +770,20 @@ fn build_gltf_payload(
         let mut trn: Vec<&Triangle> = Vec::new();
         let mut trn_idx: Vec<usize> = Vec::new();
         let mut trn_sk: Vec<[VertexSkin; 3]> = Vec::new();
+        let mut tex_buckets: Vec<(Vec<&Triangle>, Vec<usize>, Vec<[VertexSkin; 3]>)> =
+            vec![(Vec::new(), Vec::new(), Vec::new()); tex_mat_indices.len()];
+
         for (i, t) in tris.iter().enumerate() {
+            if let Some(tid) = t.tex_id {
+                if let Some(bucket) = tex_buckets.get_mut(tid as usize) {
+                    bucket.0.push(t);
+                    bucket.1.push(i);
+                    if let Some(sk) = all_skins {
+                        bucket.2.push(sk[i]);
+                    }
+                    continue;
+                }
+            }
             if !t.is_translucent {
                 opq.push(t);
                 opq_idx.push(i);
@@ -615,6 +817,7 @@ fn build_gltf_payload(
             let m_arg = slice_morphs(&opq_idx);
             let mut p = append_primitive_buffers(
                 &opq,
+                false,
                 sk_arg,
                 m_arg.as_deref(),
                 &mut bin,
@@ -631,6 +834,7 @@ fn build_gltf_payload(
             let m_arg = slice_morphs(&trn_idx);
             let mut p = append_primitive_buffers(
                 &trn,
+                false,
                 sk_arg,
                 m_arg.as_deref(),
                 &mut bin,
@@ -639,6 +843,27 @@ fn build_gltf_payload(
             );
             if let (JsonVal::Obj(ref mut fields), Some(mi)) = (&mut p, trans_mat_idx) {
                 fields.push(("material".into(), JsonVal::Int(mi as i64)));
+            }
+            prims.push(p);
+        }
+        for (bi, (b_tris, b_idx, b_sk)) in tex_buckets.iter().enumerate() {
+            if b_tris.is_empty() {
+                continue;
+            }
+            let (mat_idx, has_nm) = tex_mat_indices[bi];
+            let sk_arg = all_skins.map(|_| b_sk.as_slice());
+            let m_arg = slice_morphs(b_idx);
+            let mut p = append_primitive_buffers(
+                b_tris,
+                has_nm,
+                sk_arg,
+                m_arg.as_deref(),
+                &mut bin,
+                &mut buffer_views,
+                &mut accessors,
+            );
+            if let JsonVal::Obj(ref mut fields) = p {
+                fields.push(("material".into(), JsonVal::Int(mat_idx as i64)));
             }
             prims.push(p);
         }
@@ -868,63 +1093,20 @@ fn build_gltf_payload(
         gltf_skins.push(obj(skin_fields));
     }
 
-    // 3 PBR Atlas images (BaseColor, ORM, Emissive)
-    let mut images = Vec::new();
-    if let Some(prefix) = external_palette_prefix {
-        images.push(obj(vec![
-            ("name", JsonVal::Str("palette_basecolor".into())),
-            ("uri", JsonVal::Str(format!("{prefix}_basecolor.png"))),
-        ]));
-        images.push(obj(vec![
-            ("name", JsonVal::Str("palette_orm".into())),
-            ("uri", JsonVal::Str(format!("{prefix}_orm.png"))),
-        ]));
-        images.push(obj(vec![
-            ("name", JsonVal::Str("palette_emissive".into())),
-            ("uri", JsonVal::Str(format!("{prefix}_emissive.png"))),
-        ]));
-    } else {
-        let pngs = [
-            ("palette_basecolor", palette.encode_basecolor_png()),
-            ("palette_orm", palette.encode_orm_png()),
-            ("palette_emissive", palette.encode_emissive_png()),
-        ];
-        if is_glb {
-            for (img_name, bytes) in pngs {
-                pad4(&mut bin);
-                let off = bin.len();
-                bin.extend_from_slice(&bytes);
-                let bv = buffer_views.len();
-                buffer_views.push(obj(vec![
-                    ("buffer", JsonVal::Int(0)),
-                    ("byteOffset", JsonVal::Int(off as i64)),
-                    ("byteLength", JsonVal::Int(bytes.len() as i64)),
-                ]));
-                images.push(obj(vec![
-                    ("name", JsonVal::Str(img_name.into())),
-                    ("mimeType", JsonVal::Str("image/png".into())),
-                    ("bufferView", JsonVal::Int(bv as i64)),
-                ]));
-            }
-        } else {
-            for (img_name, bytes) in pngs {
-                let uri = format!("data:image/png;base64,{}", base64::encode(&bytes));
-                images.push(obj(vec![
-                    ("name", JsonVal::Str(img_name.into())),
-                    ("mimeType", JsonVal::Str("image/png".into())),
-                    ("uri", JsonVal::Str(uri)),
-                ]));
-            }
-        }
-    }
-
     for col in &mesh.colliders {
         if col.tris.is_empty() {
             continue;
         }
         let col_refs: Vec<&Triangle> = col.tris.iter().collect();
-        let mut col_prim =
-            append_primitive_buffers(&col_refs, None, None, &mut bin, &mut buffer_views, &mut accessors);
+        let mut col_prim = append_primitive_buffers(
+            &col_refs,
+            false,
+            None,
+            None,
+            &mut bin,
+            &mut buffer_views,
+            &mut accessors,
+        );
         if let JsonVal::Obj(ref mut map) = col_prim {
             map.push(("material".into(), JsonVal::Int(opaque_mat_idx.unwrap_or(0) as i64)));
         }
@@ -1289,23 +1471,8 @@ fn build_gltf_payload(
         ("nodes", JsonVal::Arr(all_nodes)),
         ("meshes", JsonVal::Arr(gltf_meshes)),
         ("materials", JsonVal::Arr(materials)),
-        (
-            "samplers",
-            JsonVal::Arr(vec![obj(vec![
-                ("magFilter", JsonVal::Int(9728)),
-                ("minFilter", JsonVal::Int(9728)),
-                ("wrapS", JsonVal::Int(33071)),
-                ("wrapT", JsonVal::Int(33071)),
-            ])]),
-        ),
-        (
-            "textures",
-            JsonVal::Arr(vec![
-                obj(vec![("sampler", JsonVal::Int(0)), ("source", JsonVal::Int(0))]),
-                obj(vec![("sampler", JsonVal::Int(0)), ("source", JsonVal::Int(1))]),
-                obj(vec![("sampler", JsonVal::Int(0)), ("source", JsonVal::Int(2))]),
-            ]),
-        ),
+        ("samplers", JsonVal::Arr(gltf_samplers)),
+        ("textures", JsonVal::Arr(gltf_textures)),
         ("images", JsonVal::Arr(images)),
         ("buffers", JsonVal::Arr(vec![buffer_obj])),
         ("bufferViews", JsonVal::Arr(buffer_views)),

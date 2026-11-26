@@ -759,7 +759,10 @@ pub fn apply_lbs_skinning(
             nc,
             face_normal: if fn_v.len_sq() > 0.5 { fn_v } else { t.face_normal },
             uv: t.uv,
+            uv_b: t.uv_b,
+            uv_c: t.uv_c,
             is_translucent: t.is_translucent,
+            tex_id: t.tex_id,
             rigid_bone: t.rigid_bone,
             part_tag: t.part_tag,
         });
