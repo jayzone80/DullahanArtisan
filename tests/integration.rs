@@ -8,7 +8,10 @@ use dullahan_artisan::mesh::parser::{
     compile_model, compile_model_with_dir, load_and_compile_model,
     load_and_compile_model_with_overrides,
 };
-use dullahan_artisan::mesh::render::{render_to_png, render_turntable_png, RenderOptions};
+use dullahan_artisan::mesh::render::{
+    render_anim_paths_png, render_anim_sheet_png, render_to_png, render_turntable_png,
+    RenderOptions,
+};
 use dullahan_artisan::mesh::validator::{validate_glb_bytes, validate_gltf_json_str};
 use dullahan_artisan::sfx::diagnostics::{analyze_wav, render_diagnostic_png};
 use dullahan_artisan::sfx::engine::render_sound;
@@ -33,6 +36,7 @@ fn palette_and_all_example_models_build_validate_render() {
         "examples/models/props_shotgun_medkit.mdl",
         "examples/models/fox_on_stones.mdl",
         "examples/models/workbench_tools.mdl",
+        "examples/models/clockwork_automaton.mdl",
     ] {
         let (parsed, p, _) = load_and_compile_model(Path::new(mdl), None).unwrap();
         assert!(!parsed.mesh.tris.is_empty(), "{mdl} produced 0 tris");
@@ -407,4 +411,239 @@ cyl brass_gold 1.5,.5,0 .35,.32,.8 seg=16 bev=.03 wn=1
     let (glb, _) = export_glb(&parsed.mesh, &pal, "wn_test", None).unwrap();
     let rep = validate_glb_bytes(&glb).unwrap();
     assert!(rep.is_ok(), "wn=1 GLB errors: {:?}", rep.errors);
+}
+
+#[test]
+fn keyframe_animation_nested_nodes_events_paths_and_sheet() {
+    let pal = Palette::load_file(Path::new("examples/palette.pal")).unwrap();
+    let src = r#"
+# Ground reference pad
+cyl stone_mid 0,.02,0 .9,.9,.04 seg=16 bev=.01 wn=1
+
+# Nested hierarchy: BallPivot translates along parabolic arc, Ball squashes/stretches & spins!
+node BallPivot 0,0,0
+  node Ball 0,0,0
+    ico red_paint 0,.28,0 .28 sub=2 sm=1
+    tor roof_cream 0,.28,0 .275,.028 seg=16 tseg=8 sm=1
+  end
+end
+
+anim bounce dur=0.80 fps=24 loop=1
+  # Contact squash -> upward launch stretch -> apex hang-time -> falling stretch -> impact squash
+  key 0.00 BallPivot p=-0.45,0.00,0 i=easeout
+  key 0.40 BallPivot p=0.00,1.15,0  i=easein
+  key 0.80 BallPivot p=0.45,0.00,0  i=lin
+
+  key 0.00 Ball s=1.32,0.62,1.32 r=0,0,0    i=easeout
+  key 0.12 Ball s=0.82,1.28,0.82 r=0,0,-30  i=ease
+  key 0.40 Ball s=1.02,0.98,1.02 r=0,0,-180 i=easein
+  key 0.70 Ball s=0.80,1.30,0.80 r=0,0,-330 i=lin
+  key 0.80 Ball s=1.32,0.62,1.32 r=0,0,-360
+
+  ev 0.00 sfx:bounce_thud
+  ev 0.40 apex
+end
+"#;
+    let parsed = compile_model(src, "bouncing_ball", &pal).unwrap();
+    assert_eq!(parsed.mesh.actions.len(), 1);
+    assert_eq!(parsed.mesh.total_node_count(), 2);
+    assert_eq!(parsed.mesh.actions[0].events.len(), 2);
+
+    // Export both glTF JSON & binary GLB and verify native glTF animations, CUBICSPLINE, and extras.events
+    let (gltf, _) = export_gltf_json(&parsed.mesh, &pal, "bouncing_ball", None).unwrap();
+    assert!(gltf.contains("\"animations\""));
+    assert!(gltf.contains("\"CUBICSPLINE\""));
+    assert!(gltf.contains("\"sfx:bounce_thud\""));
+    assert!(gltf.contains("\"BallPivot\""));
+    let rep_gltf = validate_gltf_json_str(&gltf).unwrap();
+    assert!(rep_gltf.is_ok(), "anim glTF errors: {:?}", rep_gltf.errors);
+
+    let (glb, _) = export_glb(&parsed.mesh, &pal, "bouncing_ball", None).unwrap();
+    let rep_glb = validate_glb_bytes(&glb).unwrap();
+    assert!(rep_glb.is_ok(), "anim GLB errors: {:?}", rep_glb.errors);
+
+    // Verify 4-view motion-path debug PNG & compact 8-frame thumbnail filmstrip PNG
+    let mut opts = RenderOptions::default();
+    opts.width = 240;
+    opts.height = 180;
+    let paths_png = render_anim_paths_png(&parsed.mesh, &pal, &parsed.mesh.actions[0], &[], &opts);
+    assert!(inspect_and_verify_png(&paths_png).is_ok());
+
+    let sheet_png = render_anim_sheet_png(&parsed.mesh, &pal, &parsed.mesh.actions[0], 8, &RenderOptions::default());
+    assert!(inspect_and_verify_png(&sheet_png).is_ok());
+}
+
+#[test]
+fn skeletal_rig_auto_skinning_ik_and_bones_overlay() {
+    let pal = Palette::load_file(Path::new("examples/palette.pal")).unwrap();
+    let src = r#"
+skel
+  bone Hips         -            0,.70,0     0,.86,0     r=.16
+  bone Chest        Hips         0,.86,0     0,1.22,0    r=.18
+  bone Head         Chest        0,1.22,0    0,1.46,0    r=.13
+  bone LeftUpperLeg Hips         .12,.68,0   .12,.36,0   r=.10 m=x
+  bone LeftLowerLeg LeftUpperLeg .12,.36,0   .12,.04,0   r=.09 m=x
+  bone LeftFoot     LeftLowerLeg .12,.04,0   .12,.02,.14 r=.07 m=x
+  # 3-bone FABRIK arm chain for N-bone IK verification
+  bone Arm1         Chest        .22,1.14,0  .42,1.14,0  r=.07
+  bone Arm2         Arm1         .42,1.14,0  .60,1.14,0  r=.06
+  bone Arm3         Arm2         .60,1.14,0  .76,1.14,0  r=.05
+end
+
+# Mix auto-skinned organic torso/legs + rigid `bone=` helmet & mirrored boots!
+sdf @body res=18
+  cap olive_body 0,.74,0 0,1.18,0 .16,.18
+  cap olive_body .12,.68,0 .12,.08,0 .08,.07 m=x
+  cap steel_mid  .22,1.14,0 .74,1.14,0 .055,.04
+end
+box @head  brass_gold 0,1.34,0 .22,.22,.22 bev=.03 wn=1 bone=Head
+box @boots iron_dark  .12,.04,.04 .11,.08,.18 bev=.015 wn=1 bone=LeftFoot m=x
+
+anim walk dur=0.80 fps=24 loop=1
+  key 0.00 Hips dp=0,-0.03,0 r=0,-5,0 i=ease
+  key 0.40 Hips dp=0,0.03,0  r=0,5,0  i=ease
+  key 0.80 Hips dp=0,-0.03,0 r=0,-5,0
+
+  # 2-bone analytical IK for LeftFoot & RightFoot
+  ik 0.00 LeftFoot  p=.12,.04,.20  pole=.12,.4,1.0  chain=2 i=lin
+  ik 0.40 LeftFoot  p=.12,.04,-.18 pole=.12,.4,1.0  chain=2 i=easeout
+  ik 0.60 LeftFoot  p=.12,.16,.02  pole=.12,.4,1.0  chain=2 i=easein
+  ik 0.80 LeftFoot  p=.12,.04,.20  pole=.12,.4,1.0  chain=2
+
+  ik 0.00 RightFoot p=-.12,.04,-.18 pole=-.12,.4,1.0 chain=2 i=easeout
+  ik 0.20 RightFoot p=-.12,.16,.02  pole=-.12,.4,1.0 chain=2 i=easein
+  ik 0.40 RightFoot p=-.12,.04,.20  pole=-.12,.4,1.0 chain=2 i=lin
+  ik 0.80 RightFoot p=-.12,.04,-.18 pole=-.12,.4,1.0 chain=2
+
+  # 3-bone FABRIK IK for the robot arm tip
+  ik 0.00 Arm3 p=.55,1.35,.22 pole=.45,1.0,-.4 chain=3 tip=1 i=ease
+  ik 0.40 Arm3 p=.55,.95,.25  pole=.45,1.0,-.4 chain=3 tip=1 i=ease
+  ik 0.80 Arm3 p=.55,1.35,.22 pole=.45,1.0,-.4 chain=3 tip=1
+
+  ev 0.00 sfx:footstep_l
+  ev 0.40 sfx:footstep_r
+end
+"#;
+    let parsed = compile_model(src, "rigged_bot", &pal).unwrap();
+    // 3 center + 6 mirrored leg/foot + 3 arm = 12 bones
+    assert_eq!(parsed.mesh.bones.len(), 12);
+    assert!(parsed.mesh.bones.iter().any(|b| b.name == "RightFoot"));
+
+    // Verify 2-bone analytical IK & 3-bone FABRIK IK actually hit their world targets accurately!
+    let pose0 = dullahan_artisan::mesh::skel::evaluate_skeleton_pose(
+        &parsed.mesh.bones,
+        &parsed.mesh.actions[0],
+        0.0,
+    );
+    let lf_idx = parsed.mesh.bones.iter().position(|b| b.name == "LeftFoot").unwrap();
+    let lf_head = pose0.bone_world_head(lf_idx);
+    let lf_err = (lf_head - dullahan_artisan::common::math::Vec3::new(0.12, 0.04, 0.20)).len();
+    assert!(lf_err < 0.015, "2-bone IK LeftFoot missed target by {lf_err:.4}m (at {lf_head:?})");
+
+    let a3_idx = parsed.mesh.bones.iter().position(|b| b.name == "Arm3").unwrap();
+    let a3_tail = pose0.bone_world_tail(&parsed.mesh.bones, a3_idx);
+    let a3_err = (a3_tail - dullahan_artisan::common::math::Vec3::new(0.55, 1.35, 0.22)).len();
+    assert!(a3_err < 0.02, "3-bone FABRIK IK Arm3 tip missed target by {a3_err:.4}m (at {a3_tail:?})");
+
+    // Export glTF + GLB and verify `skins`, `JOINTS_0`, `WEIGHTS_0`, `inverseBindMatrices`, and baked IK `animations`
+    let (gltf, _) = export_gltf_json(&parsed.mesh, &pal, "rigged_bot", None).unwrap();
+    assert!(gltf.contains("\"skins\""));
+    assert!(gltf.contains("\"JOINTS_0\""));
+    assert!(gltf.contains("\"WEIGHTS_0\""));
+    assert!(gltf.contains("\"inverseBindMatrices\""));
+    assert!(gltf.contains("\"animations\""));
+    assert!(gltf.contains("\"sfx:footstep_l\""));
+    let rep_gltf = validate_gltf_json_str(&gltf).unwrap();
+    assert!(rep_gltf.is_ok(), "rigged glTF errors: {:?}", rep_gltf.errors);
+
+    let (glb, _) = export_glb(&parsed.mesh, &pal, "rigged_bot", None).unwrap();
+    let rep_glb = validate_glb_bytes(&glb).unwrap();
+    assert!(rep_glb.is_ok(), "rigged GLB errors: {:?}", rep_glb.errors);
+
+    // Render 4-view --bones overlay + --paths + --anim-sheet
+    let mut opts = RenderOptions::default();
+    opts.width = 240;
+    opts.height = 180;
+    opts.show_bones = true;
+    let rig_turn = render_turntable_png(&parsed.mesh, &pal, &opts);
+    assert!(inspect_and_verify_png(&rig_turn).is_ok());
+
+    let paths = render_anim_paths_png(&parsed.mesh, &pal, &parsed.mesh.actions[0], &[], &opts);
+    assert!(inspect_and_verify_png(&paths).is_ok());
+
+    let sheet = render_anim_sheet_png(&parsed.mesh, &pal, &parsed.mesh.actions[0], 8, &RenderOptions::default());
+    assert!(inspect_and_verify_png(&sheet).is_ok());
+}
+
+#[test]
+fn morph_targets_export_validate_and_animate_with_skinning() {
+    let pal = Palette::load_file(Path::new("examples/palette.pal")).unwrap();
+    let src = r#"
+skel
+  bone Chest -     0,0.8,0 0,1.3,0 r=.22
+  bone Head  Chest 0,1.3,0 0,1.6,0 r=.16
+end
+
+sdf @torso res=18
+  cap olive_body 0,0.82,0 0,1.28,0 .18,.20
+end
+box @head  brass_gold 0,1.46,0 .22,.22,.22 bev=.02 wn=1 bone=Head
+ico @eyes  amber_glow .055,1.48,.115 .025 sub=1 sm=1 m=x bone=Head
+
+morph blink
+  scale @eyes 1,0.10,1
+end
+
+morph breathe
+  inflate @torso 0,1.08,0 r=.25 amt=.022
+end
+
+morph emote
+  pull 0.055,1.48,.115 r=.04 d=0,0.015,0.008 m=x
+end
+
+anim idle dur=1.0 fps=24 loop=1
+  key 0.00 Head r=0,-8,0 i=ease
+  key 0.50 Head r=0,8,0  i=ease
+  key 1.00 Head r=0,-8,0
+  mw 0.00 blink 0 i=ease
+  mw 0.45 blink 1 i=ease
+  mw 0.55 blink 0
+  mw 0.00 breathe 0 i=ease
+  mw 0.50 breathe 1 i=ease
+  mw 1.00 breathe 0
+end
+"#;
+    let parsed = compile_model(src, "morph_bot", &pal).unwrap();
+    assert_eq!(parsed.mesh.morphs.len(), 3);
+    assert!(parsed
+        .mesh
+        .morphs
+        .iter()
+        .all(|m| m.delta_pos.iter().flat_map(|d| d.iter()).any(|v| v.len_sq() > 1e-8)));
+
+    // Verify morph evaluation in bind pose + combined morph-then-skin pose evaluation
+    let (morphed, _) = dullahan_artisan::mesh::anim::evaluate_pose(
+        &parsed.mesh,
+        &parsed.mesh.actions[0],
+        0.50,
+    );
+    assert_eq!(morphed.tris.len(), parsed.mesh.tris.len());
+
+    // Export glTF & GLB and verify `targets`, `weights`, `targetNames`, and `weights` animation path
+    let (gltf, _) = export_gltf_json(&parsed.mesh, &pal, "morph_bot", None).unwrap();
+    assert!(gltf.contains("\"targets\""));
+    assert!(gltf.contains("\"targetNames\":[\"blink\",\"breathe\",\"emote\"]"));
+    assert!(gltf.contains("\"path\":\"weights\""));
+    assert!(gltf.contains("\"skins\""));
+    let rep_gltf = validate_gltf_json_str(&gltf).unwrap();
+    assert!(rep_gltf.is_ok(), "morph glTF errors: {:?}", rep_gltf.errors);
+
+    let (glb, _) = export_glb(&parsed.mesh, &pal, "morph_bot", None).unwrap();
+    let rep_glb = validate_glb_bytes(&glb).unwrap();
+    assert!(rep_glb.is_ok(), "morph GLB errors: {:?}", rep_glb.errors);
+
+    // Render static morphed preview and animated filmstrip
+    let sheet = render_anim_sheet_png(&parsed.mesh, &pal, &parsed.mesh.actions[0], 6, &RenderOptions::default());
+    assert!(inspect_and_verify_png(&sheet).is_ok());
 }

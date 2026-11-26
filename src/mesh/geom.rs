@@ -1,7 +1,10 @@
 use std::collections::HashMap;
 
 use crate::common::math::{Aabb, Mat4, Vec2, Vec3};
+use crate::mesh::anim::AnimAction;
+use crate::mesh::morph::{apply_morph_targets, MorphTarget};
 use crate::mesh::palette::ResolvedMat;
+use crate::mesh::skel::Bone;
 
 #[derive(Debug, Clone, Copy)]
 pub struct Triangle {
@@ -14,6 +17,10 @@ pub struct Triangle {
     pub face_normal: Vec3,
     pub uv: Vec2,
     pub is_translucent: bool,
+    /// Optional explicit rigid bone index (`bone=<name>`); `None` uses automatic smooth skinning when rigged.
+    pub rigid_bone: Option<u16>,
+    /// Optional `@part` tag index into `Mesh.tag_names` (used by `morph` blend-shape targeting).
+    pub part_tag: Option<u16>,
 }
 
 #[derive(Debug, Clone)]
@@ -29,6 +36,7 @@ pub struct ChildNodeMesh {
     pub rotation_deg: Vec3,
     pub scale: Vec3,
     pub tris: Vec<Triangle>,
+    pub children: Vec<ChildNodeMesh>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -40,11 +48,28 @@ pub struct Mesh {
     pub colliders: Vec<ColliderMesh>,
     /// Optional named visual child nodes with local pivots for animated sub-parts (e.g. `LeverPivot`, `TargetMast`).
     pub nodes: Vec<ChildNodeMesh>,
+    /// Optional keyframe animation actions (`anim`/`action` blocks) exported to glTF 2.0 `animations`.
+    pub actions: Vec<AnimAction>,
+    /// Optional skeletal rig bones (`skel ... end`) exported to glTF 2.0 `skins`.
+    pub bones: Vec<Bone>,
+    /// Optional morph targets / blend shapes (`morph ... end`) exported to glTF 2.0 `primitive.targets`.
+    pub morphs: Vec<MorphTarget>,
+    /// Interned `@id` tag names indexed by `Triangle.part_tag`.
+    pub tag_names: Vec<String>,
 }
 
 impl Mesh {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    pub fn intern_tag(&mut self, tag: &str) -> u16 {
+        if let Some(i) = self.tag_names.iter().position(|s| s == tag) {
+            return i as u16;
+        }
+        let id = self.tag_names.len() as u16;
+        self.tag_names.push(tag.to_string());
+        id
     }
 
     pub fn add_tri(&mut self, a: Vec3, b: Vec3, c: Vec3, mat: ResolvedMat) {
@@ -64,6 +89,8 @@ impl Mesh {
             face_normal: n,
             uv: mat.uv,
             is_translucent: mat.is_translucent,
+            rigid_bone: None,
+            part_tag: None,
         });
     }
 
@@ -80,40 +107,77 @@ impl Mesh {
             bb.expand(t.b);
             bb.expand(t.c);
         }
-        for node in &self.nodes {
-            let mat = Mat4::from_trs(node.translation, node.rotation_deg, node.scale);
+        fn expand_node(node: &ChildNodeMesh, parent: Mat4, bb: &mut Aabb) {
+            let mat = parent.mul(Mat4::from_trs(node.translation, node.rotation_deg, node.scale));
             for t in &node.tris {
                 bb.expand(mat.transform_point(t.a));
                 bb.expand(mat.transform_point(t.b));
                 bb.expand(mat.transform_point(t.c));
             }
+            for ch in &node.children {
+                expand_node(ch, mat, bb);
+            }
+        }
+        for node in &self.nodes {
+            expand_node(node, Mat4::IDENTITY, &mut bb);
         }
         bb
     }
 
-    /// Total visual triangle count across root mesh and all named visual child nodes.
+    /// Total visual triangle count across root mesh and all named visual child nodes (recursively).
     pub fn total_visual_tris(&self) -> usize {
-        self.tris.len() + self.nodes.iter().map(|n| n.tris.len()).sum::<usize>()
+        fn count_node(n: &ChildNodeMesh) -> usize {
+            n.tris.len() + n.children.iter().map(count_node).sum::<usize>()
+        }
+        self.tris.len() + self.nodes.iter().map(count_node).sum::<usize>()
     }
 
-    /// Flatten root geometry + all transformed visual child nodes into a single mesh (for software rendering).
+    /// Total visual child node count (recursively).
+    pub fn total_node_count(&self) -> usize {
+        fn count_n(n: &ChildNodeMesh) -> usize {
+            1 + n.children.iter().map(count_n).sum::<usize>()
+        }
+        self.nodes.iter().map(count_n).sum()
+    }
+
+    /// Flatten root geometry + default morph weights + all transformed visual child nodes (for software rendering).
     pub fn flattened_visual(&self) -> Mesh {
+        let base_tris = if self.morphs.is_empty() {
+            self.tris.clone()
+        } else {
+            let weights: Vec<f32> = self.morphs.iter().map(|m| m.default_weight).collect();
+            apply_morph_targets(&self.tris, &self.morphs, &weights)
+        };
         if self.nodes.is_empty() {
-            return self.clone();
+            let mut out = self.clone();
+            out.tris = base_tris;
+            return out;
         }
         let mut out = Mesh {
-            tris: self.tris.clone(),
+            tris: base_tris,
             part_bounds: self.part_bounds.clone(),
             colliders: self.colliders.clone(),
             nodes: Vec::new(),
+            actions: Vec::new(),
+            bones: self.bones.clone(),
+            morphs: Vec::new(),
+            tag_names: Vec::new(),
         };
+        fn append_node(node: &ChildNodeMesh, parent: Mat4, out: &mut Mesh) {
+            let mat = parent.mul(Mat4::from_trs(node.translation, node.rotation_deg, node.scale));
+            if !node.tris.is_empty() {
+                let sub = Mesh {
+                    tris: node.tris.clone(),
+                    ..Mesh::default()
+                };
+                out.append_transformed(&sub, mat, Some(&node.name));
+            }
+            for ch in &node.children {
+                append_node(ch, mat, out);
+            }
+        }
         for node in &self.nodes {
-            let sub = Mesh {
-                tris: node.tris.clone(),
-                ..Mesh::default()
-            };
-            let mat = Mat4::from_trs(node.translation, node.rotation_deg, node.scale);
-            out.append_transformed(&sub, mat, Some(&node.name));
+            append_node(node, Mat4::IDENTITY, &mut out);
         }
         out
     }
@@ -361,6 +425,8 @@ impl Mesh {
                                     face_normal: fn_v,
                                     uv: t.uv,
                                     is_translucent: t.is_translucent,
+                                    rigid_bone: t.rigid_bone,
+                                    part_tag: t.part_tag,
                                 });
                             }
                         }
@@ -463,6 +529,9 @@ impl Mesh {
     pub fn append_transformed(&mut self, src: &Mesh, mat: Mat4, tag: Option<&str>) {
         let flip = mat.det3() < 0.0;
         let mut tag_bb = Aabb::empty();
+        let outer_tag_id = tag.map(|s| self.intern_tag(s));
+        // Remap inner part tags from `src` into `self.tag_names`
+        let inner_tag_remap: Vec<u16> = src.tag_names.iter().map(|s| self.intern_tag(s)).collect();
 
         for t in &src.tris {
             let pa = mat.transform_point(t.a);
@@ -508,6 +577,11 @@ impl Mesh {
                 face_normal: face_n,
                 uv: t.uv,
                 is_translucent: t.is_translucent,
+                rigid_bone: t.rigid_bone,
+                part_tag: t
+                    .part_tag
+                    .and_then(|id| inner_tag_remap.get(id as usize).copied())
+                    .or(outer_tag_id),
             });
         }
 

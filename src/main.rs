@@ -6,7 +6,10 @@ use dullahan_artisan::common::math::parse_hex_rgba;
 use dullahan_artisan::mesh::gltf::{export_glb, export_gltf_json};
 use dullahan_artisan::mesh::palette::Palette;
 use dullahan_artisan::mesh::parser::load_and_compile_model_with_overrides;
-use dullahan_artisan::mesh::render::{render_to_png, render_turntable_png, RenderOptions};
+use dullahan_artisan::mesh::render::{
+    render_anim_paths_png, render_anim_sheet_png, render_to_png, render_turntable_png,
+    RenderOptions,
+};
 use dullahan_artisan::mesh::validator::{validate_file as validate_gltf_file, validate_glb_bytes, validate_gltf_json_str};
 use dullahan_artisan::sfx::diagnostics::{analyze_wav, render_diagnostic_png};
 use dullahan_artisan::sfx::engine::render_sound;
@@ -132,9 +135,15 @@ fn cmd_mesh(args: &[String]) -> Result<(), String> {
     let mut ext_pal: Option<String> = None;
     let mut render_out: Option<PathBuf> = None;
     let mut turn_out: Option<PathBuf> = None;
+    let mut paths_out: Option<PathBuf> = None;
+    let mut sheet_out: Option<PathBuf> = None;
+    let mut anim_name: Option<String> = None;
+    let mut track_nodes: Vec<String> = Vec::new();
+    let mut sheet_frames: usize = 8;
     let mut focus_id: Option<String> = None;
     let mut hud_override: Option<bool> = None;
     let mut cli_overrides: HashMap<String, String> = HashMap::new();
+    let mut cli_morphs: Vec<(String, f32)> = Vec::new();
     let mut opts = RenderOptions::default();
 
     let mut i = 0;
@@ -181,6 +190,36 @@ fn cmd_mesh(args: &[String]) -> Result<(), String> {
                 i += 1;
                 turn_out = Some(PathBuf::from(args.get(i).ok_or("--turn requires png path")?));
             }
+            "--anim" | "--action" => {
+                i += 1;
+                anim_name = Some(args.get(i).ok_or("--anim requires action name")?.clone());
+            }
+            "--paths" | "--motion-paths" => {
+                i += 1;
+                paths_out = Some(PathBuf::from(args.get(i).ok_or("--paths requires png path")?));
+            }
+            "--track" => {
+                i += 1;
+                let list = args.get(i).ok_or("--track requires node1[,node2,...]")?;
+                for item in list.split(',') {
+                    let s = item.trim().strip_prefix('@').unwrap_or(item.trim());
+                    if !s.is_empty() {
+                        track_nodes.push(s.to_string());
+                    }
+                }
+            }
+            "--anim-sheet" | "--sheet" => {
+                i += 1;
+                sheet_out = Some(PathBuf::from(args.get(i).ok_or("--anim-sheet requires png path")?));
+            }
+            "--frames" => {
+                i += 1;
+                sheet_frames = args
+                    .get(i)
+                    .ok_or("--frames requires N")?
+                    .parse()
+                    .map_err(|_| "bad --frames")?;
+            }
             "--focus" => {
                 i += 1;
                 let id = args.get(i).ok_or("--focus requires @id")?;
@@ -216,6 +255,27 @@ fn cmd_mesh(args: &[String]) -> Result<(), String> {
             "--ortho" => opts.ortho = true,
             "--wire" | "--wireframe" => opts.wireframe = true,
             "--colliders" => opts.show_colliders = true,
+            "--bones" | "--rig" => opts.show_bones = true,
+            "--morph" | "--shape" => {
+                i += 1;
+                let spec = args
+                    .get(i)
+                    .ok_or("--morph requires name:weight[,name2:weight2]")?;
+                for pair in spec.split(',') {
+                    let pair = pair.trim();
+                    if pair.is_empty() {
+                        continue;
+                    }
+                    let (mname, w_str) = pair
+                        .split_once(':')
+                        .ok_or_else(|| format!("invalid --morph pair '{pair}' (expected name:weight)"))?;
+                    let w: f32 = w_str
+                        .trim()
+                        .parse()
+                        .map_err(|_| format!("invalid --morph weight '{w_str}'"))?;
+                    cli_morphs.push((mname.trim().to_string(), w));
+                }
+            }
             "--hud" => {
                 i += 1;
                 let v = args.get(i).ok_or("--hud requires 0|1")?;
@@ -228,8 +288,20 @@ fn cmd_mesh(args: &[String]) -> Result<(), String> {
     }
 
     let in_path = input.ok_or("mesh requires <file.mdl>")?;
-    let (parsed, palette, _pal_path) =
+    let (mut parsed, palette, _pal_path) =
         load_and_compile_model_with_overrides(&in_path, pal_override.as_deref(), &cli_overrides)?;
+
+    for (mname, w) in &cli_morphs {
+        if let Some(m) = parsed.mesh.morphs.iter_mut().find(|m| m.name == *mname) {
+            m.default_weight = *w;
+        } else {
+            let avail: Vec<&str> = parsed.mesh.morphs.iter().map(|m| m.name.as_str()).collect();
+            return Err(format!(
+                "unknown morph '{mname}' (available: {})",
+                if avail.is_empty() { "none".to_string() } else { avail.join(", ") }
+            ));
+        }
+    }
 
     if let Some(ref fid) = focus_id {
         if let Some(&bb) = parsed.mesh.part_bounds.get(fid) {
@@ -293,13 +365,64 @@ fn cmd_mesh(args: &[String]) -> Result<(), String> {
         std::fs::write(tp, png).map_err(|e| format!("write turntable png: {e}"))?;
     }
 
+    if paths_out.is_some() || sheet_out.is_some() {
+        if parsed.mesh.actions.is_empty() {
+            return Err("no `anim`/`action` blocks defined in model (required for --paths / --anim-sheet)".into());
+        }
+        let act = if let Some(ref an) = anim_name {
+            parsed
+                .mesh
+                .actions
+                .iter()
+                .find(|a| a.name == *an)
+                .ok_or_else(|| {
+                    let avail: Vec<&str> = parsed.mesh.actions.iter().map(|a| a.name.as_str()).collect();
+                    format!("unknown anim '{an}' (available: {})", avail.join(", "))
+                })?
+        } else {
+            &parsed.mesh.actions[0]
+        };
+
+        if let Some(ref pp) = paths_out {
+            ensure_parent(pp)?;
+            let mut popts = opts.clone();
+            if popts.width == 640 && popts.height == 480 {
+                popts.width = 400;
+                popts.height = 300;
+            }
+            let png = render_anim_paths_png(&parsed.mesh, &palette, act, &track_nodes, &popts);
+            std::fs::write(pp, png).map_err(|e| format!("write motion-paths png: {e}"))?;
+        }
+        if let Some(ref sp) = sheet_out {
+            ensure_parent(sp)?;
+            let png = render_anim_sheet_png(&parsed.mesh, &palette, act, sheet_frames, &opts);
+            std::fs::write(sp, png).map_err(|e| format!("write anim-sheet png: {e}"))?;
+        }
+    }
+
     let bb = parsed.mesh.compute_bounds();
     let sz = if bb.is_valid() { bb.size() } else { dullahan_artisan::common::math::Vec3::ZERO };
     let total_tris = parsed.mesh.total_visual_tris();
-    let node_info = if parsed.mesh.nodes.is_empty() {
+    let total_nodes = parsed.mesh.total_node_count();
+    let node_info = if total_nodes == 0 {
         String::new()
     } else {
-        format!(" nodes={}", parsed.mesh.nodes.len())
+        format!(" nodes={total_nodes}")
+    };
+    let bone_info = if parsed.mesh.bones.is_empty() {
+        String::new()
+    } else {
+        format!(" bones={}", parsed.mesh.bones.len())
+    };
+    let morph_info = if parsed.mesh.morphs.is_empty() {
+        String::new()
+    } else {
+        format!(" morphs={}", parsed.mesh.morphs.len())
+    };
+    let anim_info = if parsed.mesh.actions.is_empty() {
+        String::new()
+    } else {
+        format!(" anims={}", parsed.mesh.actions.len())
     };
     let col_info = if parsed.mesh.colliders.is_empty() {
         String::new()
@@ -307,7 +430,7 @@ fn cmd_mesh(args: &[String]) -> Result<(), String> {
         format!(" cols={}", parsed.mesh.colliders.len())
     };
     println!(
-        "OK mesh {} tris={} verts={} draws={} bbox=[{:.2}x{:.2}x{:.2}] y=[{:.2}..{:.2}] parts={}{}{}{}",
+        "OK mesh {} tris={} verts={} draws={} bbox=[{:.2}x{:.2}x{:.2}] y=[{:.2}..{:.2}] parts={}{}{}{}{}{}{}",
         parsed.name,
         total_tris,
         total_tris * 3,
@@ -319,6 +442,9 @@ fn cmd_mesh(args: &[String]) -> Result<(), String> {
         if bb.is_valid() { bb.max.y } else { 0.0 },
         parsed.part_count,
         node_info,
+        bone_info,
+        morph_info,
+        anim_info,
         col_info,
         export_info
     );
@@ -945,9 +1071,10 @@ fn print_usage() {
 USAGE:
   artisan pal <file.pal> [-o <prefix>] [--sheet <png>]
   artisan mesh <file.mdl> [-p <pal>] [-o <out.glb|.gltf>] [--ext-pal <prefix>]
-               [--ov old:new[,old2:new2]] [--render <png>] [--turn <png>] [--focus <id>]
+               [--ov old:new[,old2:new2]] [--morph name:w[,...]] [--render <png>] [--turn <png>] [--focus <id>]
+               [--anim <name>] [--paths <png>] [--track n1,n2] [--anim-sheet <png>] [--frames N]
                [--size WxH] [--yaw D] [--pitch D] [--fov D] [--fill F]
-               [--bg #hex] [--ortho] [--wire] [--colliders] [--hud 0|1]
+               [--bg #hex] [--ortho] [--wire] [--colliders] [--bones] [--hud 0|1]
   artisan sfx <file.sfx> [-k <kit>] [-o <out.wav>] [--var N]
               [--plot <png>] [--size WxH] [--seed S]
   artisan svg <file.svg> [-o <out.png>] [--preview <qa.png>]
@@ -984,7 +1111,20 @@ Note:   #RRGGBBAA with alpha<FF auto-routes triangles into an optional 2nd BLEND
             r#"=== MESH (.mdl) — Right-handed Y-up (+X right, +Y up, +Z front, Y=0 ground), CCW outward ===
 Directives: pal <rel.pal> | inc <rel.mdl> (or use <rel.mdl>) | $var = <expr> (+ - * / ^ sin cos tan sind cosd atan2 atan2d sqrt abs min max pi)
 Blocks:     def <name> ... end | grp [@id] [mat] [x,y,z] [flags...] ... end
-ChildNodes: node <name> [x,y,z] [r=rx,ry,rz] [s=sx,sy,sz] [m=...] ... end  (named glTF child mesh w/ local pivot!)
+ChildNodes: node <name> [x,y,z] [r=rx,ry,rz] [s=sx,sy,sz] [m=...] ... end  (nestable glTF child mesh w/ local pivot!)
+Skeleton:   skel ... end  (alias: rig; exports glTF 2.0 `skins` w/ auto smooth skinning + optional rigid `bone=<name>`)
+            bone <name> <parent|-> <head_x,y,z> <tail_x,y,z> [r=rad] [falloff=3] [m=x]
+Morphs:     morph <name> [w=0] ... end  (alias: shape; glTF 2.0 morph targets + mesh.extras.targetNames)
+            scale   [@tag] <sx,sy,sz> [at=x,y,z] [r=rad] [m=x]
+            move    [@tag] <dx,dy,dz> [at=x,y,z] [r=rad] [m=x]  (alias: shift)
+            pull    [@tag] <x,y,z> r=<rad> d=<dx,dy,dz> [m=x]   (soft spherical pull)
+            rot     [@tag] <rx,ry,rz> [at=x,y,z] [r=rad] [m=x]
+            inflate [@tag] [x,y,z] [r=rad] amt=<dist> [m=x]     (alias: push, bulge)
+Actions:    anim <name> [dur=1] [fps=24] [loop=0|1] ... end   (alias: action; glTF 2.0 animations + extras.events)
+            key <sec|Nf> <node|bone> [p=x,y,z] [dp=dx,dy,dz] [r=rx,ry,rz] [s=u|sx,sy,sz] [i=step|lin|ease|easein|easeout|cubic]
+            ik  <sec|Nf> <effector_bone> p=x,y,z [pole=px,py,pz] [chain=2] [tip=0|1] [i=...]  (2-bone analytical & FABRIK IK!)
+            mw  <sec|Nf> <morph_name> <weight> [i=step|lin|ease|easein|easeout|cubic]         (animates glTF morph weights!)
+            ev  <sec|Nf> <event_name> [data...]               (e.g. ev 0.00 sfx:footstep_l)
 Colliders:  col <node_name> [x,y,z] [flags...] ... end   (exports separate child glTF node; mat optional inside)
 Booleans:   csg [@id] [mat] [x,y,z] [flags...] ... end   (exact BSP mesh ops: add/sub/int <prim|use|grp>)
 Metaballs:  sdf [@id] [mat] [x,y,z] [res=28] [sm=1] ... end   (Surface-Nets organic sculpting)

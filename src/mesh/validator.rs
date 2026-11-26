@@ -362,6 +362,35 @@ fn validate_parsed(
                     }
                 }
 
+                // Optional morph targets (`primitive.targets`): verify POSITION delta bounds & count
+                if let Some(targets) = prim.get("targets").and_then(|v| v.as_arr()) {
+                    for (ti, tgt) in targets.iter().enumerate() {
+                        if let Some(dp_i) = tgt.get("POSITION").and_then(|v| v.as_usize()) {
+                            let (dp_acc, dp_data) = slice_bv(dp_i)?;
+                            let dcnt = dp_acc.get("count").and_then(|v| v.as_usize()).unwrap_or(0);
+                            if dcnt != vcount {
+                                rep.errors.push(format!(
+                                    "primitive[{pi}].target[{ti}] POSITION count {dcnt} != {vcount}"
+                                ));
+                            }
+                            if dp_acc.get("min").is_none() || dp_acc.get("max").is_none() {
+                                rep.errors.push(format!(
+                                    "primitive[{pi}].target[{ti}] POSITION missing min/max"
+                                ));
+                            }
+                            for chunk in dp_data.chunks_exact(4) {
+                                let v = f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
+                                if !v.is_finite() {
+                                    rep.errors.push(format!(
+                                        "primitive[{pi}].target[{ti}] non-finite POSITION delta"
+                                    ));
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+
                 // Indices strictly in [0, vcount)
                 if let Some(idx_i) = prim.get("indices").and_then(|v| v.as_usize()) {
                     let (idx_acc, idx_data) = slice_bv(idx_i)?;
@@ -385,6 +414,139 @@ fn validate_parsed(
                         if val >= vcount {
                             rep.errors.push(format!("primitive[{pi}] index {val} >= vertexCount {vcount}"));
                             break;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Validate optional glTF 2.0 `skins` (valid joint indices + inverseBindMatrices count & finite values)
+    let node_count = root
+        .get("nodes")
+        .and_then(|v| v.as_arr())
+        .map(|a| a.len())
+        .unwrap_or(0);
+    if let Some(skins) = root.get("skins").and_then(|v| v.as_arr()) {
+        for (si, skin) in skins.iter().enumerate() {
+            let joints = skin.get("joints").and_then(|v| v.as_arr()).unwrap_or(&[]);
+            if joints.is_empty() {
+                rep.errors.push(format!("skin[{si}] has no joints"));
+            }
+            for (ji, jv) in joints.iter().enumerate() {
+                let n_i = jv.as_usize().unwrap_or(usize::MAX);
+                if n_i >= node_count {
+                    rep.errors.push(format!("skin[{si}].joints[{ji}] invalid node {n_i}"));
+                }
+            }
+            if let Some(ibm_i) = skin.get("inverseBindMatrices").and_then(|v| v.as_usize()) {
+                let (ibm_acc, ibm_bytes) = slice_bv(ibm_i)?;
+                let cnt = ibm_acc.get("count").and_then(|v| v.as_usize()).unwrap_or(0);
+                if cnt != joints.len() {
+                    rep.errors.push(format!(
+                        "skin[{si}] inverseBindMatrices count {cnt} != joints {}",
+                        joints.len()
+                    ));
+                }
+                for chunk in ibm_bytes.chunks_exact(4) {
+                    let v = f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
+                    if !v.is_finite() {
+                        rep.errors.push(format!("skin[{si}] non-finite inverseBindMatrix entry"));
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    // Validate optional glTF 2.0 `animations` (samplers, strictly non-decreasing timestamps, valid target nodes)
+    let mesh_morph_counts: Vec<usize> = meshes
+        .iter()
+        .map(|m| m.get("weights").and_then(|w| w.as_arr()).map(|a| a.len()).unwrap_or(0))
+        .collect();
+    let nodes_arr = root.get("nodes").and_then(|v| v.as_arr()).unwrap_or(&[]);
+    if let Some(anims) = root.get("animations").and_then(|v| v.as_arr()) {
+        for (ai, anim) in anims.iter().enumerate() {
+            let samplers = anim
+                .get("samplers")
+                .and_then(|v| v.as_arr())
+                .unwrap_or(&[]);
+            let chans = anim
+                .get("channels")
+                .and_then(|v| v.as_arr())
+                .unwrap_or(&[]);
+            for (si, samp) in samplers.iter().enumerate() {
+                let Some(in_i) = samp.get("input").and_then(|v| v.as_usize()) else {
+                    rep.errors.push(format!("animation[{ai}].sampler[{si}] missing input"));
+                    continue;
+                };
+                let Some(out_i) = samp.get("output").and_then(|v| v.as_usize()) else {
+                    rep.errors.push(format!("animation[{ai}].sampler[{si}] missing output"));
+                    continue;
+                };
+                let (in_acc, in_bytes) = slice_bv(in_i)?;
+                let (out_acc, out_bytes) = slice_bv(out_i)?;
+                let in_cnt = in_acc.get("count").and_then(|v| v.as_usize()).unwrap_or(0);
+                let out_cnt = out_acc.get("count").and_then(|v| v.as_usize()).unwrap_or(0);
+                let interp = samp
+                    .get("interpolation")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("LINEAR");
+                // For `weights` channels, output count is in_cnt * num_morph_targets (times 3 if CUBICSPLINE)
+                let mut morph_mul = 1usize;
+                for ch in chans {
+                    if ch.get("sampler").and_then(|v| v.as_usize()) == Some(si) {
+                        if let Some(tgt) = ch.get("target") {
+                            if tgt.get("path").and_then(|v| v.as_str()) == Some("weights") {
+                                if let Some(ni) = tgt.get("node").and_then(|v| v.as_usize()) {
+                                    if let Some(mi) = nodes_arr.get(ni).and_then(|n| n.get("mesh")).and_then(|v| v.as_usize()) {
+                                        morph_mul = mesh_morph_counts.get(mi).copied().unwrap_or(1).max(1);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                let expected_out = if interp == "CUBICSPLINE" {
+                    in_cnt * 3 * morph_mul
+                } else {
+                    in_cnt * morph_mul
+                };
+                if out_cnt != expected_out {
+                    rep.errors.push(format!(
+                        "animation[{ai}].sampler[{si}] output count {out_cnt} != expected {expected_out}"
+                    ));
+                }
+                let mut prev_t = f32::NEG_INFINITY;
+                for k in 0..in_cnt {
+                    let b = &in_bytes[k * 4..(k + 1) * 4];
+                    let t = f32::from_le_bytes([b[0], b[1], b[2], b[3]]);
+                    if !t.is_finite() || t < prev_t {
+                        rep.errors.push(format!(
+                            "animation[{ai}].sampler[{si}] invalid timestamp {t} at {k}"
+                        ));
+                        break;
+                    }
+                    prev_t = t;
+                }
+                for chunk in out_bytes.chunks_exact(4) {
+                    let v = f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
+                    if !v.is_finite() {
+                        rep.errors.push(format!("animation[{ai}].sampler[{si}] non-finite output value"));
+                        break;
+                    }
+                }
+            }
+            if let Some(chans) = anim.get("channels").and_then(|v| v.as_arr()) {
+                for (ci, ch) in chans.iter().enumerate() {
+                    let s_i = ch.get("sampler").and_then(|v| v.as_usize()).unwrap_or(usize::MAX);
+                    if s_i >= samplers.len() {
+                        rep.errors.push(format!("animation[{ai}].channel[{ci}] invalid sampler {s_i}"));
+                    }
+                    if let Some(tgt) = ch.get("target") {
+                        let n_i = tgt.get("node").and_then(|v| v.as_usize()).unwrap_or(usize::MAX);
+                        if n_i >= node_count {
+                            rep.errors.push(format!("animation[{ai}].channel[{ci}] invalid node {n_i}"));
                         }
                     }
                 }

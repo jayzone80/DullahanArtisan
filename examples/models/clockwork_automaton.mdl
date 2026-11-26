@@ -1,0 +1,232 @@
+pal ../palette.pal
+# Clockwork Explorer Automaton — Rigged 16-Bone Humanoid (Godot SkeletonProfileHumanoid naming)
+# Showcases: `skel` + `m=x` bones, automatic smooth skinning + rigid `bone=` armor, `wn=1` bevels, 2-bone IK `walk` & `wave`, `morph` blend shapes, glTF events
+
+# ============================================================================
+# 1. Skeleton (16 bones, Godot SkeletonProfileHumanoid convention, world rest pose)
+# ============================================================================
+skel
+  bone Hips          -             0,.84,0      0,.98,0      r=.16
+  bone Spine         Hips          0,.98,0      0,1.14,0     r=.15
+  bone Chest         Spine         0,1.14,0     0,1.42,0     r=.20
+  bone Head          Chest         0,1.42,0     0,1.72,0     r=.15
+
+  # Slight natural A-pose arms (clearly separated from torso for clean auto-skinning!)
+  bone LeftUpperArm  Chest         .25,1.36,0   .46,1.16,0   r=.085 m=x
+  bone LeftLowerArm  LeftUpperArm  .46,1.16,0   .62,.94,0    r=.075 m=x
+  bone LeftHand      LeftLowerArm  .62,.94,0    .68,.84,0    r=.060 m=x
+
+  # Cleanly separated bipedal legs (knee at Y=0.45, ankle at Y=0.09)
+  bone LeftUpperLeg  Hips          .13,.82,0    .13,.45,0    r=.105 m=x
+  bone LeftLowerLeg  LeftUpperLeg  .13,.45,0    .13,.09,0    r=.090 m=x
+  bone LeftFoot      LeftLowerLeg  .13,.09,0    .13,.04,.16  r=.075 m=x
+end
+
+# ============================================================================
+# 2. Auto-Skinned Flexible Under-Frame (bends smoothly at waist, elbows & knees!)
+# ============================================================================
+# Flexible dark rubber/iron articulated inner torso & limb joints (no `bone=` -> smooth auto-skin!)
+sdf @inner_frame res=26 sm=1
+  # Pelvis -> flexible waist bellows -> upper torso core
+  cap rubber_dark  0,.84,0     0,1.28,0    .12,.13
+  # Smooth shoulder -> elbow -> wrist inner arm conduits (mirrored X)
+  cap bumper_dark  .24,1.36,0  .46,1.16,0  .055,.048  k=.03 m=x
+  cap bumper_dark  .46,1.16,0  .63,.93,0   .048,.042  k=.03 m=x
+  # Smooth hip -> knee -> ankle inner leg pistons (mirrored X)
+  cap bumper_dark  .13,.82,0   .13,.45,0   .074,.062  k=.03 m=x
+  cap bumper_dark  .13,.45,0   .13,.09,0   .062,.054  k=.03 m=x
+end
+
+# ============================================================================
+# 3. Rigid `bone=` Manufactured Armor Plates (`bev=` + `wn=1` Face-Weighted Normals!)
+# ============================================================================
+# Pelvis armor girdle & belt buckle (`bone=Hips`)
+box @pelvis     slate_blue  0,.87,0       .34,.14,.24  t=1.06,1.04 bev=.022 wn=1 bone=Hips
+box @belt       leather_dark 0,.95,0      .355,.055,.255 bev=.008 wn=1 bone=Hips
+box @buckle     brass_gold  0,.95,.134    .085,.068,.024 bev=.008 wn=1 bone=Hips
+
+# Waist brass accordion rib ring (`bone=Spine`)
+cyl @waist_ring brass_gold  0,1.05,0      .145,.155,.085 seg=14 bev=.012 wn=1 bone=Spine
+
+# Iconic manufactured Olive & Brass Explorer Chest Chassis (`bone=Chest`)
+grp @chest_armor 0,1.26,0 bone=Chest
+  box @chest_box  olive_body  0,0,0          .42,.31,.29  t=1.08,1.04 bev=.028 wn=1
+  box brass_gold  0,.02,.152     .24,.18,.032 bev=.010 wn=1
+  cyl iron_dark   0,.03,.168     .062,.058,.024 r=90,0,0 seg=14 bev=.006 wn=1
+  cyl @core_lamp  beacon_gold 0,.03,.176     .040,.040,.014 r=90,0,0 seg=12 bev=.004 wn=1
+  # Shoulder yoke collar & dual brass exhaust vents on back
+  box copper_patina 0,.165,0     .26,.042,.22 bev=.010 wn=1
+  box leather_dark  0,-.01,-.18  .30,.24,.11  bev=.020 wn=1
+  box brass_gold    .10,.06,-.24 .055,.07,.03 bev=.006 wn=1 m=x
+  cyl steel_mid     .11,.17,-.17 .028,.024,.12 seg=10 bev=.005 wn=1 m=x
+end
+
+# Expressive Brass & Visor Automaton Head (`bone=Head`)
+grp @head_unit 0,1.58,0 bone=Head
+  cyl iron_dark   0,-.12,0       .062,.062,.075 seg=12 bev=.006 wn=1
+  box olive_light 0,0,0          .26,.22,.24  t=.92,.92 bev=.028 wn=1
+  # Recessed dark face bezel & glowing amber optic eyes
+  box iron_dark   0,.01,.118     .21,.11,.026 bev=.008 wn=1
+  box glass_tint  0,.01,.132     .185,.085,.010 bev=.003 wn=1
+  ico @eyes       eye_amber   .048,.012,.128 .024 sub=1 sm=1 m=x
+  # Brass ear-dials & top radio beacon antenna
+  cyl brass_gold  .142,0,0       .042,.036,.032 r=0,0,90 seg=12 bev=.006 wn=1 m=x
+  cyl steel_mid   0,.155,-.02    .012,.008,.11  seg=8  bev=.002 wn=1
+  ico @beacon     beacon_gold 0,.218,-.02    .022 sub=1 sm=1
+end
+
+# Mirrored Arm Armor: Pauldrons + Upper/Lower Sleeves + Mechanical Hands (`m=x` auto-maps Left->Right bones!)
+box @pauldron   red_paint   .27,1.34,0    .13,.12,.15  r=0,0,32 bev=.018 wn=1 bone=LeftUpperArm m=x
+cyl @upper_arm  olive_body  .36,1.26,0    .060,.054,.19 r=0,0,46 seg=12 bev=.010 wn=1 bone=LeftUpperArm m=x
+ico @elbow_cap  brass_gold  .46,1.16,0    .056 sub=1 sm=1 bone=LeftLowerArm m=x
+cyl @forearm    steel_mid   .54,1.05,0    .054,.062,.20 r=0,0,36 seg=12 bev=.012 wn=1 bone=LeftLowerArm m=x
+box @hand_palm  brass_gold  .65,.89,0     .072,.092,.082 r=0,0,28 bev=.012 wn=1 bone=LeftHand m=x
+
+# Mirrored Leg Armor: Thigh Plates, Knee Guards, Shin Greaves & Heavy Explorer Boots (`m=x` auto-maps Left->Right!)
+box @thigh_arm  olive_body  .13,.64,0     .145,.26,.155 bev=.020 wn=1 bone=LeftUpperLeg m=x
+box @knee_pad   brass_gold  .13,.45,.078  .105,.105,.045 bev=.012 wn=1 bone=LeftLowerLeg m=x
+box @shin_arm   slate_blue  .13,.27,0     .135,.26,.145 t=1.08,1.08 bev=.018 wn=1 bone=LeftLowerLeg m=x
+grp @boot       .13,.045,.045 bone=LeftFoot m=x
+  box leather_dark 0,.015,0      .145,.082,.23  bev=.016 wn=1
+  box iron_dark    0,-.030,.005  .155,.026,.245 bev=.006 wn=1
+  box brass_gold   0,.025,.098   .125,.048,.055 bev=.010 wn=1
+end
+
+# ============================================================================
+# 4. Blend Shapes / Morph Targets (`blink`, `happy`, `breathe`)
+# ============================================================================
+# Exported as native glTF 2.0 morph targets + `mesh.extras.targetNames` (Blender Shape Keys / Godot Blend Shapes!)
+morph blink
+  scale @eyes 1,0.12,1
+end
+
+morph happy
+  scale @eyes      1.22,0.58,1
+  move  @eyes      0,0.008,0
+  scale @core_lamp 1.24,1.24,1.15
+  scale @beacon    1.28,1.28,1.28
+end
+
+morph breathe
+  scale @chest_box 1.03,1.02,1.05
+  scale @core_lamp 1.14,1.14,1.10
+end
+
+# ============================================================================
+# 5. Action 1: Full 2-Bone Analytical IK Walk Cycle (`walk`, 0.80s loop @ 24fps)
+# ============================================================================
+anim walk dur=0.80 fps=24 loop=1
+  # Energetic bipedal hip bounce (double frequency: low on contact, high on passing) + pelvic yaw
+  key 0.00 Hips  dp=0,-0.045,0  r=4,-8,2    i=ease
+  key 0.20 Hips  dp=0,0.025,0   r=2,0,-3    i=ease
+  key 0.40 Hips  dp=0,-0.045,0  r=4,8,-2    i=ease
+  key 0.60 Hips  dp=0,0.025,0   r=2,0,3     i=ease
+  key 0.80 Hips  dp=0,-0.045,0  r=4,-8,2
+
+  # Counter-rotating chest + lively head stabilization
+  key 0.00 Chest r=5,10,-2   i=ease
+  key 0.40 Chest r=5,-10,2   i=ease
+  key 0.80 Chest r=5,10,-2
+
+  key 0.00 Head  r=-4,-5,0   i=ease
+  key 0.20 Head  r=2,0,2     i=ease
+  key 0.40 Head  r=-4,5,0    i=ease
+  key 0.60 Head  r=2,0,-2    i=ease
+  key 0.80 Head  r=-4,-5,0
+
+  # 2-Bone Analytical IK Legs (LeftFoot: planted contact 0->0.40, lifted swing arc 0.40->0.80)
+  ik  0.00 LeftFoot  p=.13,.09,.24   pole=.13,.50,1.2  chain=2 i=lin
+  ik  0.20 LeftFoot  p=.13,.09,.00   pole=.13,.50,1.2  chain=2 i=lin
+  ik  0.40 LeftFoot  p=.13,.11,-.24  pole=.13,.50,1.2  chain=2 i=easeout
+  ik  0.60 LeftFoot  p=.13,.24,.02   pole=.13,.55,1.2  chain=2 i=easein
+  ik  0.80 LeftFoot  p=.13,.09,.24   pole=.13,.50,1.2  chain=2
+
+  # RightFoot half-cycle out of phase
+  ik  0.00 RightFoot p=-.13,.11,-.24 pole=-.13,.50,1.2 chain=2 i=easeout
+  ik  0.20 RightFoot p=-.13,.24,.02  pole=-.13,.55,1.2 chain=2 i=easein
+  ik  0.40 RightFoot p=-.13,.09,.24  pole=-.13,.50,1.2 chain=2 i=lin
+  ik  0.60 RightFoot p=-.13,.09,.00  pole=-.13,.50,1.2 chain=2 i=lin
+  ik  0.80 RightFoot p=-.13,.11,-.24 pole=-.13,.50,1.2 chain=2
+
+  # Subtle ankle pitch matching heel-strike & toe-off
+  key 0.00 LeftFoot  r=-16,0,0 i=ease
+  key 0.20 LeftFoot  r=0,0,0   i=ease
+  key 0.40 LeftFoot  r=22,0,0  i=ease
+  key 0.60 LeftFoot  r=8,0,0   i=ease
+  key 0.80 LeftFoot  r=-16,0,0
+
+  key 0.00 RightFoot r=22,0,0  i=ease
+  key 0.20 RightFoot r=8,0,0   i=ease
+  key 0.40 RightFoot r=-16,0,0 i=ease
+  key 0.60 RightFoot r=0,0,0   i=ease
+  key 0.80 RightFoot r=22,0,0
+
+  # 2-Bone Analytical IK Counter-Swinging Arms (elbow poles behind in -Z!)
+  ik  0.00 LeftHand  p=.36,.92,-.22  pole=.45,1.15,-1.0 chain=2 i=ease
+  ik  0.40 LeftHand  p=.34,.96,.24   pole=.45,1.15,-1.0 chain=2 i=ease
+  ik  0.80 LeftHand  p=.36,.92,-.22  pole=.45,1.15,-1.0 chain=2
+
+  ik  0.00 RightHand p=-.34,.96,.24  pole=-.45,1.15,-1.0 chain=2 i=ease
+  ik  0.40 RightHand p=-.36,.92,-.22 pole=-.45,1.15,-1.0 chain=2 i=ease
+  ik  0.80 RightHand p=-.34,.96,.24  pole=-.45,1.15,-1.0 chain=2
+
+  # Subtle breathing + natural optic blink while walking
+  mw  0.00 breathe 0   i=ease
+  mw  0.40 breathe 0.8 i=ease
+  mw  0.80 breathe 0
+  mw  0.00 blink   0   i=step
+  mw  0.58 blink   0   i=ease
+  mw  0.65 blink   1   i=ease
+  mw  0.73 blink   0
+
+  # Footstep sound cue metadata (exported in glTF animation.extras.events!)
+  ev  0.00 sfx:footstep_l
+  ev  0.40 sfx:footstep_r
+end
+
+# ============================================================================
+# 6. Action 2: Friendly IK Wave + Expressions (`wave`, 1.20s loop @ 24fps)
+# ============================================================================
+anim wave dur=1.20 fps=24 loop=1
+  key 0.00 Hips  dp=0,0,0     r=0,0,2    i=ease
+  key 0.60 Hips  dp=0,-0.02,0 r=0,0,-2   i=ease
+  key 1.20 Hips  dp=0,0,0     r=0,0,2
+
+  key 0.00 Chest r=-4,-4,4   i=ease
+  key 0.60 Chest r=-4,4,-2   i=ease
+  key 1.20 Chest r=-4,-4,4
+
+  key 0.00 Head  r=-6,6,-8   i=ease
+  key 0.60 Head  r=-2,-4,6   i=ease
+  key 1.20 Head  r=-6,6,-8
+
+  # Planted feet via IK so legs flex naturally with hip sway
+  ik  0.00 LeftFoot  p=.13,.09,0  pole=.13,.50,1.2  chain=2
+  ik  1.20 LeftFoot  p=.13,.09,0  pole=.13,.50,1.2  chain=2
+  ik  0.00 RightFoot p=-.13,.09,0 pole=-.13,.50,1.2 chain=2
+  ik  1.20 RightFoot p=-.13,.09,0 pole=-.13,.50,1.2 chain=2
+
+  # Left hand rests relaxed at side; Right hand waves cheerfully overhead!
+  ik  0.00 LeftHand  p=.36,.90,.06  pole=.48,1.15,-0.8 chain=2
+  ik  1.20 LeftHand  p=.36,.90,.06  pole=.48,1.15,-0.8 chain=2
+
+  ik  0.00 RightHand p=-.52,1.70,.12 pole=-.60,1.25,-0.4 chain=2 i=ease
+  ik  0.30 RightHand p=-.28,1.76,.14 pole=-.60,1.25,-0.4 chain=2 i=ease
+  ik  0.60 RightHand p=-.54,1.68,.12 pole=-.60,1.25,-0.4 chain=2 i=ease
+  ik  0.90 RightHand p=-.28,1.76,.14 pole=-.60,1.25,-0.4 chain=2 i=ease
+  ik  1.20 RightHand p=-.52,1.70,.12 pole=-.60,1.25,-0.4 chain=2
+
+  # Expressive happy eyes, playful mid-wave blink & steam-core breathing!
+  mw  0.00 happy   0.85 i=ease
+  mw  0.60 happy   1.00 i=ease
+  mw  1.20 happy   0.85
+  mw  0.00 blink   0    i=step
+  mw  0.48 blink   0    i=ease
+  mw  0.56 blink   1    i=ease
+  mw  0.66 blink   0
+  mw  0.00 breathe 0    i=ease
+  mw  0.60 breathe 1    i=ease
+  mw  1.20 breathe 0
+
+  ev  0.30 sfx:chime_hello
+end

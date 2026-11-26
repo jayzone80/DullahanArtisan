@@ -25,7 +25,7 @@ Run `artisan spec [pal|mesh|sfx|svg|terrain]` at any time to print the authorita
 | Task | Command |
 | :--- | :--- |
 | Build 3 PBR atlases (+ swatch sheet) | `artisan pal <file.pal> [-o <prefix>] [--sheet <png>]` |
-| Build 3D model + validate + render | `artisan mesh <file.mdl> [-p <pal>] [-o <out.glb\|.gltf>] [--ext-pal <prefix>] [--ov old:new] [--render <hero.png>] [--turn <turn.png>] [--focus <id>]` |
+| Build 3D model + validate + render | `artisan mesh <file.mdl> [-p <pal>] [-o <out.glb\|.gltf>] [--ext-pal <prefix>] [--ov old:new] [--render <hero.png>] [--turn <turn.png>] [--focus <id>] [--bones] [--anim <name> --paths <p.png> --anim-sheet <s.png> --frames 8]` |
 | Build eroded terrain maps + `.glb` | `artisan terrain <file.ter> [-p <pal>] [-o <prefix>] [--preview <diag.png>] [--mesh <out.glb>] [--render <3d.png>] [--grid N] [--tris N] [--skirt 0\|1] [--col <node>]` |
 | Heightmap + weightmap PNG → `.glb` | `artisan terrain --from-heightmap <h.png> [--weightmap <w.png>] [-p <pal>] [--world W,H,D] [--grid N] [--tris N] --mesh <out.glb>` |
 | Build audio + validate + plot | `artisan sfx <file.sfx> [-k <kit>] [-o <out.wav>] [--var N] [--plot <diag.png>] [--size WxH] [--seed S]` |
@@ -33,13 +33,13 @@ Run `artisan spec [pal|mesh|sfx|svg|terrain]` at any time to print the authorita
 | Standalone validation | `artisan validate <file.glb\|.gltf\|.wav\|.svg> [--loop]` |
 | Print full grammar | `artisan spec [pal\|mesh\|sfx\|svg\|terrain]` |
 
-Useful mesh render flags: `--size WxH`, `--yaw D`, `--pitch D`, `--fill 0.1..0.96`, `--fov D`, `--ortho`, `--wire`, `--colliders`, `--hud 0|1`, `--bg #RRGGBB`.
+Useful mesh render flags: `--size WxH`, `--yaw D`, `--pitch D`, `--fill 0.1..0.96`, `--fov D`, `--ortho`, `--wire`, `--colliders`, `--bones`, `--hud 0|1`, `--bg #RRGGBB`.
 
 ---
 
 ## Closed-Loop Authoring Workflow
 
-Adapt visual style, acoustic character, and geometric/sonic detail freely to the user's request—do not impose any default genre or fixed complexity tier. For concise, genre-neutral craft guidelines (value ramps, primitive choice, acoustic layering, and mixing hygiene), consult [references/modeling-principles.md](./references/modeling-principles.md) and [references/sound-principles.md](./references/sound-principles.md).
+Adapt visual style, acoustic character, and geometric/sonic detail freely to the user's request—do not impose any default genre or fixed complexity tier. For concise, genre-neutral craft guidelines (value ramps, primitive choice, rigging/bone naming conventions, acoustic layering, and mixing hygiene), consult [references/modeling-principles.md](./references/modeling-principles.md), [references/rigging-conventions.md](./references/rigging-conventions.md), and [references/sound-principles.md](./references/sound-principles.md).
 
 ### 1. Shared PBR Palette (`.pal`)
 - Line 1 sets grid layout and tile resolution: `grid <C>x<R>@<tilePx> [bg=#RRGGBB]` (e.g. `grid 8x8@16`).
@@ -49,11 +49,13 @@ Adapt visual style, acoustic character, and geometric/sonic detail freely to the
 
 ### 2. 3D Models (`.mdl`)
 - **Coordinate space**: Right-handed Y-up (`+X` right, `+Y` up, `+Z` front, `Y=0` ground), outward CCW winding.
-- **Structure**: Reference palette via `pal <rel.pal>` and import shared part kits via `use <rel.mdl>` (or `inc <rel.mdl>`). Define `$var = expr` dimensions at the top to prevent placement drift. Tag key sub-parts with `@id` for targeted edits and `--focus <id>` inspection renders. Factor repeating assemblies into `def <name> ... end` and stamp via `use` (with `ov=old:new`, `m=x|y|z|xz`, `rep=`, `rad=`), or generate colorways/liveries at build time with CLI `--ov old:new`. Put animated sub-parts in `node <name> [x,y,z] [r=...] [s=...] ... end` (exported as named glTF child nodes with local pivots!) and simplified physics colliders in `col <node_name> ... end` (inspect fit with `--colliders`).
+- **Structure**: Reference palette via `pal <rel.pal>` and import shared part kits via `use <rel.mdl>` (or `inc <rel.mdl>`). Define `$var = expr` dimensions at the top to prevent placement drift. Tag key sub-parts with `@id` for targeted edits and `--focus <id>` inspection renders. Factor repeating assemblies into `def <name> ... end` and stamp via `use` (with `ov=old:new`, `m=x|y|z|xz`, `rep=`, `rad=`), or generate colorways/liveries at build time with CLI `--ov old:new`. Put animated sub-parts in nestable `node <name> [x,y,z] [r=...] [s=...] ... end` (exported as hierarchical glTF child nodes with local pivots!), animate them with `anim <name> [dur=S] [fps=24] [loop=0|1] ... end` (`key <sec|Nf> <node> [p=] [r=] [s=] [i=step|lin|ease|easein|easeout|cubic]` + `ev <sec|Nf> <event> [data]` exported to glTF `animation.extras.events`; inspect with `--paths` 4-view motion paths & `--anim-sheet` thumbnail strip), and put simplified physics colliders in `col <node_name> ... end` (inspect fit with `--colliders`).
 - **Primitives & Sculpting**: `box` (`t=`, `o=`, `bev=`), `cyl` (`rt=0` for cone, `cap=0` for open ring, `bev=`), `cap`, `wdg`, `pyr`, `ico` (`sub=`, watertight `jit=`, `mats=`), `tor`, `pri` (2D polygon extrude + `bev=`), `lat` (Y-axis revolve), `tub` (3D polyline sweep), `lof` (elliptical spine sweep with per-section colors), `ter` (noisy/mounded heightfield with `thk=`), `tri` (`ds=1` for double-sided foliage), `rib` (curved tapered double-sided blade/ribbon `w0,w1,h[,curve]`).
 - **Metaballs & Booleans**:
   - `sdf [@id] [res=28] [sm=1] ... end` (alias `meta`): Surface-Nets organic sculpting (`sph`, `ell`, point-to-point tapered `cap <x0,y0,z0> <x1,y1,z1> <r0[,r1]>`, `box`, `cyl`, `tor`) with smooth blending (`k=`), `sub`/`int`, mirroring (`m=x`), and geometry-preserving `paint` volumes for fur/organic markings.
   - `csg [@id] ... end`: exact BSP mesh booleans (`add`/`sub`/`int` on any primitive, `use`, or `grp`) for crisp hard-surface cutouts where carved interior faces automatically inherit the cutter's palette swatch.
+- **Rigging, Skinning & IK**: Define skeletons in `skel ... end` (`bone <name> <parent|-> <head> <tail> [r=] [falloff=] [m=x]`, auto-mirroring `_L`↔`_R` / `Left`↔`Right`). Omit `bone=` for automatic capsule-distance + connectivity-smoothed skinning, or pass `bone=<name>` on parts for rigid binding (`m=x` auto-swaps L/R bones). Animate bones with `key` (`p=`, `dp=`, `r=`, `s=`) or compile-time **2-bone analytical & FABRIK N-bone IK** (`ik <sec|Nf> <effector> p=x,y,z [pole=...] [chain=2] [tip=0|1]`) baked to native glTF FK quaternion tracks. Inspect rigs with `--bones` (4-view X-ray bone overlay), `--paths`, and `--anim-sheet`. See [references/rigging-conventions.md](./references/rigging-conventions.md) for Godot/Mixamo/UE5/Rigify naming tables.
+- **Blend Shapes / Morph Targets**: Define named deformations in `morph <name> [w=0] ... end` using `scale`, `move`, `pull`, `rot`, and `inflate` (scoped to `@part` tags and/or smooth spherical falloff `at=`/`r=`, with `m=x` symmetry). Exported as native glTF 2.0 `targets` (`POSITION` + `NORMAL` deltas) + `mesh.extras.targetNames`, animated via `mw <sec|Nf> <morph> <weight> [i=...]` inside `anim`, and previewed statically with `--morph name:weight`.
 - **Anchors & Deformers**: Centered primitives (`box`, `cyl`, `cap`, `wdg`, `pyr`, `ico`, `tor`) default to `a=c`; `rib` defaults to `a=b`; explicit-coordinate primitives (`pri`, `lat`, `tub`, `lof`, `ter`) default to `a=o`. Use `a=b` to ground upright parts on `Y`. Add `sm=1` for crease-aware smooth normals, **`wn=1`** (or `wn=2..12` / `sm=w`) for **Face-Weighted Normals** (keeps large flat panels dead-flat while making 1-segment `bev=` chamfers gleam with smooth specular edge highlights!), `bev=` for chamfers, and `bend=` / `twist=` for curved forms.
 - **Technical Visual QA** (inspect `--render` and `--turn` PNGs):
   - Check all four turnaround angles for silhouette, proportions, and alignment against the ground grid and RGB axis triad.

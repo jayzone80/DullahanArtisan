@@ -3,8 +3,10 @@ use std::path::{Path, PathBuf};
 
 use crate::common::expr::ExprEnv;
 use crate::common::math::{Aabb, Mat4, Vec2, Vec3};
+use crate::mesh::anim::{AnimAction, AnimEvent, AnimKeyframe, InterpMode};
 use crate::mesh::csg::{apply_csg, CsgOp};
 use crate::mesh::geom::{ChildNodeMesh, ColliderMesh, Mesh};
+use crate::mesh::morph::{build_morph_target, MorphKeyframe, MorphOp};
 use crate::mesh::palette::{Palette, ResolvedMat};
 use crate::mesh::primitives::{
     build_box, build_capsule, build_cylinder, build_icosphere, build_lathe, build_loft,
@@ -12,6 +14,7 @@ use crate::mesh::primitives::{
     build_wedge, FaceMats, LoftSection,
 };
 use crate::mesh::sdf::{build_sdf_mesh, SdfOp, SdfPrim, SdfShape};
+use crate::mesh::skel::{mirror_bone_name, Bone, IkKeyframe};
 
 #[derive(Debug, Clone)]
 pub struct ParsedModel {
@@ -71,6 +74,7 @@ struct CommonFlags {
     mirror: Vec<char>,
     smooth: bool,
     weighted_normals: Option<f32>,
+    bone: Option<String>,
     bend: Option<BendSpec>,
     twist: Option<TwistSpec>,
     repeat: Option<RepeatSpec>,
@@ -89,6 +93,7 @@ impl Default for CommonFlags {
             mirror: Vec::new(),
             smooth: false,
             weighted_normals: None,
+            bone: None,
             bend: None,
             twist: None,
             repeat: None,
@@ -236,7 +241,7 @@ fn load_mdl_kit_recursive(
                 .map_err(|e| format!("kit '{}': {e}", kit_path.display()))?;
             defs.insert(def_name, body);
             i = next_i;
-        } else if matches!(op.as_str(), "grp" | "col" | "node" | "csg" | "sdf" | "meta") {
+        } else if matches!(op.as_str(), "grp" | "col" | "node" | "anim" | "action" | "skel" | "rig" | "morph" | "shape" | "csg" | "sdf" | "meta") {
             // Skip any top-level preview blocks inside a kit file
             let (_body, next_i) = collect_block(&raw_lines, i + 1, raw_lines[i].lineno, &op)
                 .map_err(|e| format!("kit '{}': {e}", kit_path.display()))?;
@@ -292,8 +297,10 @@ pub fn compile_model_with_dir(
         raw_lines.push(RawLine { lineno, tokens });
     }
 
-    // Separate top-level `def <name> ... end` blocks from root statements
+    // Separate top-level `def`, `skel`/`rig`, `morph`/`shape`, and root statements
     let mut root_lines = Vec::new();
+    let mut skel_blocks: Vec<Vec<RawLine>> = Vec::new();
+    let mut morph_blocks: Vec<(RawLine, Vec<RawLine>)> = Vec::new();
     let mut i = 0usize;
     while i < raw_lines.len() {
         let op = raw_lines[i].tokens[0].to_ascii_lowercase();
@@ -306,9 +313,108 @@ pub fn compile_model_with_dir(
             let (body, next_i) = collect_block(&raw_lines, i + 1, lineno, "def")?;
             defs.insert(def_name, body);
             i = next_i;
+        } else if op == "skel" || op == "rig" {
+            let lineno = raw_lines[i].lineno;
+            let (body, next_i) = collect_block(&raw_lines, i + 1, lineno, &op)?;
+            skel_blocks.push(body);
+            i = next_i;
+        } else if op == "morph" || op == "shape" {
+            let lineno = raw_lines[i].lineno;
+            let (body, next_i) = collect_block(&raw_lines, i + 1, lineno, &op)?;
+            morph_blocks.push((raw_lines[i].clone(), body));
+            i = next_i;
         } else {
             root_lines.push(raw_lines[i].clone());
             i += 1;
+        }
+    }
+
+    let mut bones: Vec<Bone> = Vec::new();
+    let mut bone_map: HashMap<String, u16> = HashMap::new();
+    for sbody in &skel_blocks {
+        for bl in sbody {
+            let bop = bl.tokens[0].to_ascii_lowercase();
+            if bop.starts_with('$') {
+                parse_var_line(&bl.tokens, &mut env, bl.lineno)?;
+                continue;
+            }
+            if bop != "bone" && bop != "jnt" && bop != "joint" {
+                return Err(format!(
+                    "line {}: unknown statement '{}' inside skel block (use bone)",
+                    bl.lineno, bl.tokens[0]
+                ));
+            }
+            if bl.tokens.len() < 5 {
+                return Err(format!(
+                    "line {}: bone requires <name> <parent|-> <head_x,y,z> <tail_x,y,z> [r=...] [falloff=...] [m=x]",
+                    bl.lineno
+                ));
+            }
+            let bname = bl.tokens[1].strip_prefix('@').unwrap_or(&bl.tokens[1]).to_string();
+            let parent_tok = bl.tokens[2].strip_prefix('@').unwrap_or(&bl.tokens[2]);
+            let parent_idx = if parent_tok == "-" || parent_tok.eq_ignore_ascii_case("none") || parent_tok.eq_ignore_ascii_case("root") {
+                None
+            } else {
+                Some(*bone_map.get(parent_tok).ok_or_else(|| {
+                    format!("line {}: bone '{}' references unknown parent '{}'", bl.lineno, bname, parent_tok)
+                })? as usize)
+            };
+            let hv = env.eval_list_f32(&bl.tokens[3]).map_err(|e| format!("line {}: {e}", bl.lineno))?;
+            let tv = env.eval_list_f32(&bl.tokens[4]).map_err(|e| format!("line {}: {e}", bl.lineno))?;
+            if hv.len() != 3 || tv.len() != 3 {
+                return Err(format!("line {}: bone head & tail must each be x,y,z", bl.lineno));
+            }
+            let head = Vec3::new(hv[0], hv[1], hv[2]);
+            let tail = Vec3::new(tv[0], tv[1], tv[2]);
+            let blen = (tail - head).len().max(0.02);
+            let mut radius = (blen * 0.35).max(0.07);
+            let mut falloff = 3.0f32;
+            let mut mirror_x = false;
+            for tok in &bl.tokens[5..] {
+                if let Some((k, v)) = tok.split_once('=') {
+                    match k.to_ascii_lowercase().as_str() {
+                        "r" | "rad" | "radius" => {
+                            radius = env.eval_f32(v).map_err(|e| format!("line {}: {e}", bl.lineno))?.max(0.01);
+                        }
+                        "f" | "falloff" => {
+                            falloff = env.eval_f32(v).map_err(|e| format!("line {}: {e}", bl.lineno))?.clamp(1.0, 10.0);
+                        }
+                        "m" | "mirror" => {
+                            mirror_x = v.to_ascii_lowercase().contains('x');
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            let idx = bones.len() as u16;
+            bone_map.insert(bname.clone(), idx);
+            bones.push(Bone {
+                name: bname.clone(),
+                parent: parent_idx,
+                head,
+                tail,
+                radius,
+                falloff,
+            });
+            if mirror_x {
+                let m_name = mirror_bone_name(&bname);
+                let m_parent = if let Some(pi) = parent_idx {
+                    let p_mir = mirror_bone_name(&bones[pi].name);
+                    bone_map.get(&p_mir).map(|&id| id as usize).or(Some(pi))
+                } else {
+                    None
+                };
+                let m_idx = bones.len() as u16;
+                bone_map.insert(m_name.clone(), m_idx);
+                bones.push(Bone {
+                    name: m_name,
+                    parent: m_parent,
+                    head: Vec3::new(-head.x, head.y, head.z),
+                    tail: Vec3::new(-tail.x, tail.y, tail.z),
+                    radius,
+                    falloff,
+                });
+            }
         }
     }
 
@@ -316,17 +422,217 @@ pub fn compile_model_with_dir(
         palette,
         defs: &defs,
         cli_overrides,
+        bones: &bones,
+        bone_map: &bone_map,
         env,
         part_count: 0,
     };
     let overrides = HashMap::new();
-    let mesh = ctx.eval_lines(&root_lines, None, &overrides, 0)?;
+    let mut mesh = ctx.eval_lines(&root_lines, None, &overrides, 0)?;
+    let part_count = ctx.part_count;
+    let mut final_env = ctx.env;
+    mesh.bones = bones;
+
+    // Evaluate `morph <name> [w=0] ... end` blend shapes against the compiled root mesh!
+    for (hdr, mbody) in &morph_blocks {
+        let lineno = hdr.lineno;
+        if hdr.tokens.len() < 2 {
+            return Err(format!("line {lineno}: '{}' requires a morph target name", hdr.tokens[0]));
+        }
+        let mname = hdr.tokens[1].strip_prefix('@').unwrap_or(&hdr.tokens[1]).to_string();
+        let mut default_w = 0.0f32;
+        for tok in &hdr.tokens[2..] {
+            if let Some((k, v)) = tok.split_once('=') {
+                if matches!(k.to_ascii_lowercase().as_str(), "w" | "weight") {
+                    default_w = final_env
+                        .eval_f32(v)
+                        .map_err(|e| format!("line {lineno}: {e}"))?
+                        .clamp(0.0, 2.0);
+                }
+            }
+        }
+        let mut ops = Vec::new();
+        for ml in mbody {
+            let mop = ml.tokens[0].to_ascii_lowercase();
+            if mop.starts_with('$') {
+                parse_var_line(&ml.tokens, &mut final_env, ml.lineno)?;
+                continue;
+            }
+            let eval_v3 = |s: &str, env: &ExprEnv, lno: usize| -> Result<Vec3, String> {
+                let v = env.eval_list_f32(s).map_err(|e| format!("line {lno}: {e}"))?;
+                if v.len() != 3 {
+                    return Err(format!("line {lno}: expected x,y,z in '{s}'"));
+                }
+                Ok(Vec3::new(v[0], v[1], v[2]))
+            };
+            let eval_v3_or_s = |s: &str, env: &ExprEnv, lno: usize| -> Result<Vec3, String> {
+                let v = env.eval_list_f32(s).map_err(|e| format!("line {lno}: {e}"))?;
+                match v.as_slice() {
+                    [u] => Ok(Vec3::splat(*u)),
+                    [x, y, z] => Ok(Vec3::new(*x, *y, *z)),
+                    _ => Err(format!("line {lno}: expected scalar or x,y,z in '{s}'")),
+                }
+            };
+            let parse_tag_tok = |s: &str| -> Option<String> {
+                if s.eq_ignore_ascii_case("all") || s == "*" {
+                    None
+                } else {
+                    Some(s.strip_prefix('@').unwrap_or(s).to_string())
+                }
+            };
+
+            match mop.as_str() {
+                "scale" | "s" => {
+                    if ml.tokens.len() < 3 {
+                        return Err(format!("line {}: morph scale requires <@tag|all> <u|sx,sy,sz> [at=x,y,z] [r=rad]", ml.lineno));
+                    }
+                    let tag = parse_tag_tok(&ml.tokens[1]);
+                    let sc = eval_v3_or_s(&ml.tokens[2], &final_env, ml.lineno)?;
+                    let mut pivot = None;
+                    let mut radius = None;
+                    for tok in &ml.tokens[3..] {
+                        if let Some((k, v)) = tok.split_once('=') {
+                            match k.to_ascii_lowercase().as_str() {
+                                "at" | "p" | "pivot" => pivot = Some(eval_v3(v, &final_env, ml.lineno)?),
+                                "r" | "rad" | "radius" => {
+                                    radius = Some(final_env.eval_f32(v).map_err(|e| format!("line {}: {e}", ml.lineno))?);
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                    ops.push(MorphOp::Scale { tag, scale: sc, pivot, radius });
+                }
+                "move" | "shift" => {
+                    if ml.tokens.len() < 3 {
+                        return Err(format!("line {}: morph move requires <@tag|all> <dx,dy,dz> [at=x,y,z] [r=rad] [m=x]", ml.lineno));
+                    }
+                    let tag = parse_tag_tok(&ml.tokens[1]);
+                    let delta = eval_v3(&ml.tokens[2], &final_env, ml.lineno)?;
+                    let mut center = None;
+                    let mut radius = None;
+                    let mut mirror_x = false;
+                    for tok in &ml.tokens[3..] {
+                        if let Some((k, v)) = tok.split_once('=') {
+                            match k.to_ascii_lowercase().as_str() {
+                                "at" | "p" | "c" => center = Some(eval_v3(v, &final_env, ml.lineno)?),
+                                "r" | "rad" | "radius" => {
+                                    radius = Some(final_env.eval_f32(v).map_err(|e| format!("line {}: {e}", ml.lineno))?);
+                                }
+                                "m" | "mirror" => mirror_x = v.to_ascii_lowercase().contains('x'),
+                                _ => {}
+                            }
+                        }
+                    }
+                    ops.push(MorphOp::Move { tag, delta, center, radius, mirror_x });
+                }
+                "pull" => {
+                    // pull [@tag] <cx,cy,cz> r=<rad> d=<dx,dy,dz> [tag=@part] [m=x]
+                    if ml.tokens.len() < 3 {
+                        return Err(format!("line {}: morph pull requires [@tag] <cx,cy,cz> r=<rad> d=<dx,dy,dz> [m=x]", ml.lineno));
+                    }
+                    let mut idx = 1usize;
+                    let mut tag = if ml.tokens[idx].starts_with('@') {
+                        let t = parse_tag_tok(&ml.tokens[idx]);
+                        idx += 1;
+                        t
+                    } else {
+                        None
+                    };
+                    if idx >= ml.tokens.len() {
+                        return Err(format!("line {}: morph pull requires <cx,cy,cz>", ml.lineno));
+                    }
+                    let center = Some(eval_v3(&ml.tokens[idx], &final_env, ml.lineno)?);
+                    let mut radius = None;
+                    let mut delta = None;
+                    let mut mirror_x = false;
+                    for tok in &ml.tokens[idx + 1..] {
+                        if let Some((k, v)) = tok.split_once('=') {
+                            match k.to_ascii_lowercase().as_str() {
+                                "r" | "rad" | "radius" => {
+                                    radius = Some(final_env.eval_f32(v).map_err(|e| format!("line {}: {e}", ml.lineno))?);
+                                }
+                                "d" | "delta" | "v" => delta = Some(eval_v3(v, &final_env, ml.lineno)?),
+                                "tag" | "part" => tag = parse_tag_tok(v),
+                                "m" | "mirror" => mirror_x = v.to_ascii_lowercase().contains('x'),
+                                _ => {}
+                            }
+                        }
+                    }
+                    let d = delta.ok_or_else(|| format!("line {}: morph pull requires d=dx,dy,dz", ml.lineno))?;
+                    ops.push(MorphOp::Move { tag, delta: d, center, radius, mirror_x });
+                }
+                "rot" | "rotate" => {
+                    if ml.tokens.len() < 3 {
+                        return Err(format!("line {}: morph rot requires <@tag|all> <rx,ry,rz> [at=x,y,z] [m=x]", ml.lineno));
+                    }
+                    let tag = parse_tag_tok(&ml.tokens[1]);
+                    let rot_deg = eval_v3(&ml.tokens[2], &final_env, ml.lineno)?;
+                    let mut pivot = None;
+                    let mut mirror_x = false;
+                    for tok in &ml.tokens[3..] {
+                        if let Some((k, v)) = tok.split_once('=') {
+                            match k.to_ascii_lowercase().as_str() {
+                                "at" | "p" | "pivot" => pivot = Some(eval_v3(v, &final_env, ml.lineno)?),
+                                "m" | "mirror" => mirror_x = v.to_ascii_lowercase().contains('x'),
+                                _ => {}
+                            }
+                        }
+                    }
+                    ops.push(MorphOp::Rotate { tag, rot_deg, pivot, mirror_x });
+                }
+                "inflate" | "push" | "bulge" => {
+                    if ml.tokens.len() < 3 {
+                        return Err(format!("line {}: morph inflate requires <@tag|all|cx,cy,cz> [r=rad] amt=<val>", ml.lineno));
+                    }
+                    let (mut tag, mut center) = if ml.tokens[1].contains(',') {
+                        (None, Some(eval_v3(&ml.tokens[1], &final_env, ml.lineno)?))
+                    } else {
+                        (parse_tag_tok(&ml.tokens[1]), None)
+                    };
+                    let mut radius = None;
+                    let mut amount: Option<f32> = None;
+                    let mut mirror_x = false;
+                    for tok in &ml.tokens[2..] {
+                        if let Some((k, v)) = tok.split_once('=') {
+                            match k.to_ascii_lowercase().as_str() {
+                                "r" | "rad" | "radius" => {
+                                    radius = Some(final_env.eval_f32(v).map_err(|e| format!("line {}: {e}", ml.lineno))?);
+                                }
+                                "amt" | "a" | "d" => {
+                                    amount = Some(final_env.eval_f32(v).map_err(|e| format!("line {}: {e}", ml.lineno))?);
+                                }
+                                "at" | "c" => center = Some(eval_v3(v, &final_env, ml.lineno)?),
+                                "tag" | "part" => tag = parse_tag_tok(v),
+                                "m" | "mirror" => mirror_x = v.to_ascii_lowercase().contains('x'),
+                                _ => {}
+                            }
+                        } else if tok.contains(',') && center.is_none() {
+                            center = Some(eval_v3(tok, &final_env, ml.lineno)?);
+                        } else if amount.is_none() {
+                            amount = Some(final_env.eval_f32(tok).map_err(|e| format!("line {}: {e}", ml.lineno))?);
+                        }
+                    }
+                    let amt = amount.ok_or_else(|| format!("line {}: morph inflate requires amt=<delta>", ml.lineno))?;
+                    ops.push(MorphOp::Inflate { tag, amount: amt, center, radius, mirror_x });
+                }
+                _ => {
+                    return Err(format!(
+                        "line {}: unknown op '{}' inside morph block (use scale|move|pull|rot|inflate)",
+                        ml.lineno, ml.tokens[0]
+                    ));
+                }
+            }
+        }
+        let target = build_morph_target(&mesh, mname, default_w, &ops)?;
+        mesh.morphs.push(target);
+    }
 
     Ok(ParsedModel {
         name: name.to_string(),
         palette_rel: pal_rel,
         mesh,
-        part_count: ctx.part_count,
+        part_count,
     })
 }
 
@@ -334,6 +640,8 @@ struct EvalCtx<'a> {
     palette: &'a Palette,
     defs: &'a HashMap<String, Vec<RawLine>>,
     cli_overrides: &'a HashMap<String, String>,
+    bones: &'a [Bone],
+    bone_map: &'a HashMap<String, u16>,
     env: ExprEnv,
     part_count: usize,
 }
@@ -384,6 +692,274 @@ impl<'a> EvalCtx<'a> {
                 continue;
             }
 
+            if op == "anim" || op == "action" {
+                let (body, next_i) = collect_block(lines, i + 1, lineno, &op)?;
+                if line.tokens.len() < 2 {
+                    return Err(format!("line {lineno}: '{op}' requires an action name (e.g. anim bounce dur=0.8 loop=1)"));
+                }
+                let action_name = line.tokens[1]
+                    .strip_prefix('@')
+                    .unwrap_or(&line.tokens[1])
+                    .to_string();
+                let mut explicit_dur: Option<f32> = None;
+                let mut fps: f32 = 24.0;
+                let mut looping = false;
+                for tok in &line.tokens[2..] {
+                    if let Some((k, v)) = tok.split_once('=') {
+                        match k.to_ascii_lowercase().as_str() {
+                            "dur" | "duration" | "d" => {
+                                explicit_dur = Some(
+                                    self.env
+                                        .eval_f32(v)
+                                        .map_err(|e| format!("line {lineno}: {e}"))?
+                                        .max(0.01),
+                                );
+                            }
+                            "fps" => {
+                                fps = self
+                                    .env
+                                    .eval_f32(v)
+                                    .map_err(|e| format!("line {lineno}: {e}"))?
+                                    .clamp(1.0, 240.0);
+                            }
+                            "loop" => {
+                                looping = v == "1" || v.eq_ignore_ascii_case("true");
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+                let mut keyframes = Vec::new();
+                let mut ik_keys = Vec::new();
+                let mut morph_keys = Vec::new();
+                let mut events = Vec::new();
+                let mut max_t = 0.0f32;
+                let parse_time = |tok: &str, env: &ExprEnv, lno: usize| -> Result<f32, String> {
+                    let s = tok.trim();
+                    if let Some(fstr) = s.strip_suffix('f').or_else(|| s.strip_suffix('F')) {
+                        let fnum = env.eval_f32(fstr).map_err(|e| format!("line {lno}: {e}"))?;
+                        Ok((fnum / fps).max(0.0))
+                    } else {
+                        let sec = env.eval_f32(s).map_err(|e| format!("line {lno}: {e}"))?;
+                        Ok(sec.max(0.0))
+                    }
+                };
+                for al in &body {
+                    let aop = al.tokens[0].to_ascii_lowercase();
+                    if aop.starts_with('$') {
+                        parse_var_line(&al.tokens, &mut self.env, al.lineno)?;
+                        continue;
+                    }
+                    if aop == "key" || aop == "k" || aop == "kf" {
+                        if al.tokens.len() < 3 {
+                            return Err(format!(
+                                "line {}: key requires <time|Nf> <node|bone> [p=...] [dp=...] [r=...] [s=...] [i=...]",
+                                al.lineno
+                            ));
+                        }
+                        let time = parse_time(&al.tokens[1], &self.env, al.lineno)?;
+                        max_t = max_t.max(time);
+                        let target = al.tokens[2]
+                            .strip_prefix('@')
+                            .unwrap_or(&al.tokens[2])
+                            .to_string();
+                        let mut pos = None;
+                        let mut rot_deg = None;
+                        let mut scale = None;
+                        let mut interp = InterpMode::Linear;
+                        for tok in &al.tokens[3..] {
+                            if let Some((k, v)) = tok.split_once('=') {
+                                match k.to_ascii_lowercase().as_str() {
+                                    "p" | "pos" | "t" => {
+                                        pos = Some(self.parse_vec3(v, al.lineno)?);
+                                    }
+                                    "dp" | "dpos" | "dt" => {
+                                        let delta = self.parse_vec3(v, al.lineno)?;
+                                        let rest = self
+                                            .bone_map
+                                            .get(&target)
+                                            .map(|&bi| self.bones[bi as usize].rest_local_translation(self.bones))
+                                            .unwrap_or(Vec3::ZERO);
+                                        pos = Some(rest + delta);
+                                    }
+                                    "r" | "rot" => {
+                                        rot_deg = Some(self.parse_vec3(v, al.lineno)?);
+                                    }
+                                    "s" | "scale" => {
+                                        scale = Some(self.parse_vec3_or_scalar(v, al.lineno)?);
+                                    }
+                                    "i" | "interp" | "ease" => {
+                                        interp = InterpMode::parse(v).ok_or_else(|| {
+                                            format!(
+                                                "line {}: unknown interp '{v}' (use step|lin|ease|easein|easeout|cubic)",
+                                                al.lineno
+                                            )
+                                        })?;
+                                    }
+                                    _ => {
+                                        return Err(format!(
+                                            "line {}: unknown key flag '{tok}'",
+                                            al.lineno
+                                        ));
+                                    }
+                                }
+                            }
+                        }
+                        keyframes.push(AnimKeyframe {
+                            time,
+                            target,
+                            pos,
+                            rot_deg,
+                            scale,
+                            interp,
+                        });
+                    } else if aop == "ik" {
+                        if al.tokens.len() < 4 {
+                            return Err(format!(
+                                "line {}: ik requires <time|Nf> <effector_bone> p=x,y,z [pole=x,y,z] [chain=2] [tip=0|1] [i=...]",
+                                al.lineno
+                            ));
+                        }
+                        let time = parse_time(&al.tokens[1], &self.env, al.lineno)?;
+                        max_t = max_t.max(time);
+                        let effector = al.tokens[2]
+                            .strip_prefix('@')
+                            .unwrap_or(&al.tokens[2])
+                            .to_string();
+                        if !self.bone_map.contains_key(&effector) {
+                            return Err(format!(
+                                "line {}: ik references unknown bone '{}' (define it inside `skel ... end`)",
+                                al.lineno, effector
+                            ));
+                        }
+                        let mut target_pt = None;
+                        let mut pole_pt = None;
+                        let mut chain_len = 2usize;
+                        let mut use_tip = false;
+                        let mut interp = InterpMode::Linear;
+                        for tok in &al.tokens[3..] {
+                            if let Some((k, v)) = tok.split_once('=') {
+                                match k.to_ascii_lowercase().as_str() {
+                                    "p" | "pos" | "t" | "target" => {
+                                        target_pt = Some(self.parse_vec3(v, al.lineno)?);
+                                    }
+                                    "pole" => {
+                                        pole_pt = Some(self.parse_vec3(v, al.lineno)?);
+                                    }
+                                    "chain" | "len" | "n" => {
+                                        chain_len = self
+                                            .env
+                                            .eval_f32(v)
+                                            .map_err(|e| format!("line {}: {e}", al.lineno))?
+                                            .round()
+                                            .clamp(1.0, 16.0) as usize;
+                                    }
+                                    "tip" => {
+                                        use_tip = v == "1" || v.eq_ignore_ascii_case("true");
+                                    }
+                                    "i" | "interp" | "ease" => {
+                                        interp = InterpMode::parse(v).ok_or_else(|| {
+                                            format!(
+                                                "line {}: unknown interp '{v}' (use step|lin|ease|easein|easeout|cubic)",
+                                                al.lineno
+                                            )
+                                        })?;
+                                    }
+                                    _ => {
+                                        return Err(format!(
+                                            "line {}: unknown ik flag '{tok}'",
+                                            al.lineno
+                                        ));
+                                    }
+                                }
+                            }
+                        }
+                        let target = target_pt.ok_or_else(|| {
+                            format!("line {}: ik requires target position p=x,y,z", al.lineno)
+                        })?;
+                        ik_keys.push(IkKeyframe {
+                            time,
+                            effector,
+                            target,
+                            pole: pole_pt,
+                            chain_len,
+                            use_tip,
+                            interp,
+                        });
+                    } else if aop == "mw" || aop == "morph" || aop == "shape" {
+                        if al.tokens.len() < 4 {
+                            return Err(format!(
+                                "line {}: mw requires <time|Nf> <morph_name> <weight> [i=...]",
+                                al.lineno
+                            ));
+                        }
+                        let time = parse_time(&al.tokens[1], &self.env, al.lineno)?;
+                        max_t = max_t.max(time);
+                        let target = al.tokens[2]
+                            .strip_prefix('@')
+                            .unwrap_or(&al.tokens[2])
+                            .to_string();
+                        let weight = self
+                            .env
+                            .eval_f32(&al.tokens[3])
+                            .map_err(|e| format!("line {}: {e}", al.lineno))?;
+                        let mut interp = InterpMode::Linear;
+                        for tok in &al.tokens[4..] {
+                            if let Some((k, v)) = tok.split_once('=') {
+                                if matches!(k.to_ascii_lowercase().as_str(), "i" | "interp" | "ease") {
+                                    interp = InterpMode::parse(v).ok_or_else(|| {
+                                        format!(
+                                            "line {}: unknown interp '{v}' (use step|lin|ease|easein|easeout|cubic)",
+                                            al.lineno
+                                        )
+                                    })?;
+                                }
+                            }
+                        }
+                        morph_keys.push(MorphKeyframe {
+                            time,
+                            target,
+                            weight,
+                            interp,
+                        });
+                    } else if aop == "ev" || aop == "event" {
+                        if al.tokens.len() < 3 {
+                            return Err(format!(
+                                "line {}: ev requires <time|Nf> <event_name> [data]",
+                                al.lineno
+                            ));
+                        }
+                        let time = parse_time(&al.tokens[1], &self.env, al.lineno)?;
+                        max_t = max_t.max(time);
+                        let name = al.tokens[2].clone();
+                        let data = if al.tokens.len() > 3 {
+                            Some(al.tokens[3..].join(" "))
+                        } else {
+                            None
+                        };
+                        events.push(AnimEvent { time, name, data });
+                    } else {
+                        return Err(format!(
+                            "line {}: unknown statement '{}' inside anim block (use key, ik, mw, or ev)",
+                            al.lineno, al.tokens[0]
+                        ));
+                    }
+                }
+                let duration = explicit_dur.unwrap_or_else(|| max_t.max(0.1));
+                out.actions.push(AnimAction {
+                    name: action_name,
+                    duration,
+                    fps,
+                    looping,
+                    keyframes,
+                    ik_keys,
+                    morph_keys,
+                    events,
+                });
+                i = next_i;
+                continue;
+            }
+
             if op == "node" {
                 let (body, next_i) = collect_block(lines, i + 1, lineno, "node")?;
                 if line.tokens.len() < 2 {
@@ -407,17 +983,22 @@ impl<'a> EvalCtx<'a> {
                     child_mesh.translate(anchor_shift);
                 }
 
-                // Helper to register one ChildNodeMesh + propagate its world-space part_bounds for --focus
+                // Helper to register one ChildNodeMesh (supports nested children & pure pivot nodes)
                 let mut push_node = |n_name: String, n_pos: Vec3, n_rot: Vec3, n_scale: Vec3, local_m: &Mesh| {
-                    if local_m.tris.is_empty() {
+                    if local_m.tris.is_empty() && local_m.nodes.is_empty() {
                         return;
                     }
                     let xform = Mat4::from_trs(n_pos, n_rot, n_scale);
                     let mut n_bb = Aabb::empty();
-                    for t in &local_m.tris {
-                        n_bb.expand(xform.transform_point(t.a));
-                        n_bb.expand(xform.transform_point(t.b));
-                        n_bb.expand(xform.transform_point(t.c));
+                    let local_bb = local_m.compute_bounds();
+                    if local_bb.is_valid() {
+                        for sx in [local_bb.min.x, local_bb.max.x] {
+                            for sy in [local_bb.min.y, local_bb.max.y] {
+                                for sz in [local_bb.min.z, local_bb.max.z] {
+                                    n_bb.expand(xform.transform_point(Vec3::new(sx, sy, sz)));
+                                }
+                            }
+                        }
                     }
                     if n_bb.is_valid() {
                         out.part_bounds
@@ -460,6 +1041,7 @@ impl<'a> EvalCtx<'a> {
                         rotation_deg: n_rot,
                         scale: n_scale,
                         tris: local_m.tris.clone(),
+                        children: local_m.nodes.clone(),
                     });
                 };
 
@@ -507,7 +1089,7 @@ impl<'a> EvalCtx<'a> {
                     child_mesh.translate(anchor_shift);
                 }
                 let mut placed = Mesh::new();
-                emit_instanced(&mut placed, &child_mesh, pos, &flags, None);
+                emit_instanced(&mut placed, &child_mesh, pos, &flags, None, self.bones, self.bone_map, lineno)?;
                 if !placed.tris.is_empty() {
                     out.colliders.push(ColliderMesh {
                         name: col_name,
@@ -532,7 +1114,7 @@ impl<'a> EvalCtx<'a> {
                 if anchor_shift.len_sq() > 1e-10 {
                     child_mesh.translate(anchor_shift);
                 }
-                emit_instanced(&mut out, &child_mesh, pos, &flags, tag.as_deref());
+                emit_instanced(&mut out, &child_mesh, pos, &flags, tag.as_deref(), self.bones, self.bone_map, lineno)?;
                 self.part_count += 1;
                 i = next_i;
                 continue;
@@ -565,7 +1147,7 @@ impl<'a> EvalCtx<'a> {
                 if anchor_shift.len_sq() > 1e-10 {
                     child_mesh.translate(anchor_shift);
                 }
-                emit_instanced(&mut out, &child_mesh, pos, &flags, tag.as_deref());
+                emit_instanced(&mut out, &child_mesh, pos, &flags, tag.as_deref(), self.bones, self.bone_map, lineno)?;
                 self.part_count += 1;
                 i = next_i;
                 continue;
@@ -582,7 +1164,7 @@ impl<'a> EvalCtx<'a> {
                 if anchor_shift.len_sq() > 1e-10 {
                     child_mesh.translate(anchor_shift);
                 }
-                emit_instanced(&mut out, &child_mesh, pos, &flags, tag.as_deref());
+                emit_instanced(&mut out, &child_mesh, pos, &flags, tag.as_deref(), self.bones, self.bone_map, lineno)?;
                 i = next_i;
                 continue;
             }
@@ -603,7 +1185,7 @@ impl<'a> EvalCtx<'a> {
                 if anchor_shift.len_sq() > 1e-10 {
                     child_mesh.translate(anchor_shift);
                 }
-                emit_instanced(&mut out, &child_mesh, pos, &flags, tag.as_deref());
+                emit_instanced(&mut out, &child_mesh, pos, &flags, tag.as_deref(), self.bones, self.bone_map, lineno)?;
                 i += 1;
                 continue;
             }
@@ -671,7 +1253,7 @@ impl<'a> EvalCtx<'a> {
                     m.translate(ash);
                 }
                 let mut placed = Mesh::new();
-                emit_instanced(&mut placed, &m, pos, &flags, None);
+                emit_instanced(&mut placed, &m, pos, &flags, None, self.bones, self.bone_map, lineno)?;
                 i = next_i;
                 placed
             } else if head_op == "use" {
@@ -690,7 +1272,7 @@ impl<'a> EvalCtx<'a> {
                     m.translate(ash);
                 }
                 let mut placed = Mesh::new();
-                emit_instanced(&mut placed, &m, pos, &flags, None);
+                emit_instanced(&mut placed, &m, pos, &flags, None, self.bones, self.bone_map, lineno)?;
                 i += 1;
                 placed
             } else {
@@ -1304,7 +1886,7 @@ impl<'a> EvalCtx<'a> {
             local.translate(shift);
         }
 
-        emit_instanced(out, &local, pos, &flags, tag.as_deref());
+        emit_instanced(out, &local, pos, &flags, tag.as_deref(), self.bones, self.bone_map, lineno)?;
         Ok(())
     }
 
@@ -1505,7 +2087,26 @@ fn compute_anchor_shift(mesh: &Mesh, anchor: &Anchor) -> Vec3 {
     }
 }
 
-fn emit_instanced(out: &mut Mesh, local: &Mesh, pos: Vec3, flags: &CommonFlags, tag: Option<&str>) {
+#[allow(clippy::too_many_arguments)]
+fn emit_instanced(
+    out: &mut Mesh,
+    local: &Mesh,
+    pos: Vec3,
+    flags: &CommonFlags,
+    tag: Option<&str>,
+    bones: &[Bone],
+    bone_map: &HashMap<String, u16>,
+    lineno: usize,
+) -> Result<(), String> {
+    let explicit_bone = if let Some(ref bname) = flags.bone {
+        let idx = *bone_map.get(bname).ok_or_else(|| {
+            format!("line {lineno}: unknown bone '{bname}' (define it inside `skel ... end`)")
+        })?;
+        Some(idx)
+    } else {
+        None
+    };
+
     let base_trs = Mat4::from_trs(pos, flags.rot, flags.scale);
 
     // Step 1: Collect linear repeat or radial array matrices
@@ -1536,26 +2137,43 @@ fn emit_instanced(out: &mut Mesh, local: &Mesh, pos: Vec3, flags: &CommonFlags, 
         instances.push(base_trs);
     }
 
-    // Step 2: Compose mirror reflections across parent origin planes
-    let mut mirror_mats = vec![Mat4::IDENTITY];
+    // Step 2: Compose mirror reflections across parent origin planes (tracking X mirror for L/R bone swapping!)
+    let mut mirror_mats: Vec<(Mat4, bool)> = vec![(Mat4::IDENTITY, false)];
     for &ax in &flags.mirror {
-        let refl = match ax {
-            'x' => Mat4::scale(Vec3::new(-1.0, 1.0, 1.0)),
-            'y' => Mat4::scale(Vec3::new(1.0, -1.0, 1.0)),
-            'z' => Mat4::scale(Vec3::new(1.0, 1.0, -1.0)),
+        let (refl, is_x) = match ax {
+            'x' => (Mat4::scale(Vec3::new(-1.0, 1.0, 1.0)), true),
+            'y' => (Mat4::scale(Vec3::new(1.0, -1.0, 1.0)), false),
+            'z' => (Mat4::scale(Vec3::new(1.0, 1.0, -1.0)), false),
             _ => continue,
         };
         let cur = mirror_mats.clone();
-        for mm in cur {
-            mirror_mats.push(refl.mul(mm));
+        for (mm, mx) in cur {
+            mirror_mats.push((refl.mul(mm), mx ^ is_x));
         }
     }
 
-    for mm in &mirror_mats {
+    for (mm, flip_x) in &mirror_mats {
         for inst in &instances {
+            let start_len = out.tris.len();
             out.append_transformed(local, mm.mul(*inst), tag);
+            for t in &mut out.tris[start_len..] {
+                if let Some(eb) = explicit_bone {
+                    t.rigid_bone = Some(eb);
+                }
+                if *flip_x {
+                    if let Some(bi) = t.rigid_bone {
+                        if let Some(b) = bones.get(bi as usize) {
+                            let mir_name = mirror_bone_name(&b.name);
+                            if let Some(&mbi) = bone_map.get(&mir_name) {
+                                t.rigid_bone = Some(mbi);
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
+    Ok(())
 }
 
 fn parse_flags(tokens: &[String], env: &ExprEnv, lineno: usize) -> Result<CommonFlags, String> {
@@ -1619,6 +2237,9 @@ fn parse_flags(tokens: &[String], env: &ExprEnv, lineno: usize) -> Result<Common
                         f.weighted_normals = None;
                     }
                 }
+            }
+            "bone" | "jnt" => {
+                f.bone = Some(v.strip_prefix('@').unwrap_or(v).to_string());
             }
             "bend" => {
                 let parts: Vec<&str> = v.split(':').collect();
@@ -1728,7 +2349,7 @@ fn collect_block(
     let mut i = start;
     while i < lines.len() {
         let op = lines[i].tokens[0].to_ascii_lowercase();
-        if op == "def" || op == "grp" || op == "col" || op == "node" || op == "csg" || op == "sdf" || op == "meta" {
+        if matches!(op.as_str(), "def" | "grp" | "col" | "node" | "anim" | "action" | "skel" | "rig" | "morph" | "shape" | "csg" | "sdf" | "meta") {
             depth += 1;
             body.push(lines[i].clone());
         } else if op == "end" {

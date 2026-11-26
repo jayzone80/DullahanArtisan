@@ -1,6 +1,6 @@
 # Dullahan Artisan (`artisan`)
 
-> **A headless, single-binary (~1.4 MB) game-asset compiler written in zero-dependency Rust — built for LLMs to author low-poly 3D PBR models, eroded landscapes, shared color-palette atlases, procedural SFX/music, and crisp 2D Game UI SVGs directly from plaintext DSLs, with no external tools or MCP servers required.**
+> **A headless, single-binary (~1.7 MB) game-asset compiler written in zero-dependency Rust — built for LLMs to author low-poly 3D PBR models, eroded landscapes, shared color-palette atlases, procedural SFX/music, and crisp 2D Game UI SVGs directly from plaintext DSLs, with no external tools or MCP servers required.**
 
 Dullahan Artisan replaces fragile GUI and MCP round-trips with a **token-dense, line-oriented plaintext DSL** (`.pal`, `.mdl`, `.ter`, `.sfx`, `.kit`) plus a **zero-dependency Game-UI SVG validator & rasterizer** (`.svg`), compiling directly to validated **`.glb`/`.gltf`** models & QEM-decimated terrain chunks (1 opaque draw call + optional translucent pass & engine collider nodes), **16-bit heightmaps & RGBA biome weightmaps**, **3-map PBR atlases** (`BaseColor`, `ORM`, `Emissive`), **16-bit PCM `.wav`** audio, and **GPU alpha-bled `.png`** UI sprites — complete with built-in software PBR rendering, terrain erosion diagnostics, 5-panel audio spectrograms, and checkerboard/grid/9-slice SVG visual QA previews.
 
@@ -43,6 +43,19 @@ All showcase packs below share a single **2.9 KB** 3-map PBR palette atlas ([`ex
 | :---: | :---: |
 | ![Modular Dungeon Kit](docs/showcase/modular_dungeon_kit.png) | ![Shotgun and Medkit Props](docs/showcase/props_shotgun_medkit.png) |
 | [`modular_dungeon_kit.mdl`](examples/models/modular_dungeon_kit.mdl) | [`props_shotgun_medkit.mdl`](examples/models/props_shotgun_medkit.mdl) |
+
+### Skeletal Rigging, IK, Keyframe Animation & Blend Shapes (`.mdl` → animated `.glb`)
+Author full humanoid or mechanical rigs (`skel` + `m=x` auto-mirrored bones using Godot/Mixamo/UE5/Rigify naming), automatic capsule-distance + connectivity-smoothed skinning mixed with rigid `bone=` armor plates, compile-time **2-bone analytical & FABRIK N-bone IK**, **glTF 2.0 morph targets / blend shapes** (`morph` + `mesh.extras.targetNames`), and **animation frame events** (`ev` → `animation.extras.events`) — with built-in `--bones` X-ray overlays, 4-view `--paths` motion arcs, `--morph` previews, and compact `--anim-sheet` filmstrips:
+
+| Clockwork Automaton (16 Bones, `wn=1` Armor, 3 Morphs) | 4-View X-Ray Skeleton Overlay (`--bones`) |
+| :---: | :---: |
+| ![Clockwork Automaton](docs/showcase/clockwork_automaton.png) | ![Clockwork Automaton Rig Overlay](docs/showcase/clockwork_automaton_rig.png) |
+| [`clockwork_automaton.mdl`](examples/models/clockwork_automaton.mdl) | Gold = Spine, Cyan = Left, Coral = Right |
+
+| 2-Bone IK Walk Cycle + Footstep Events (`--anim-sheet`) | IK Wave + `happy`/`blink`/`breathe` Blend Shapes |
+| :---: | :---: |
+| ![Clockwork Automaton Walk Cycle](docs/showcase/clockwork_automaton_walk.png) | ![Clockwork Automaton Wave and Morphs](docs/showcase/clockwork_automaton_wave.png) |
+| `anim walk` (2-bone IK legs & arms + `ev sfx:footstep_*`) | `anim wave` (IK arm wave + `mw` blend shapes + `ev`) |
 
 ### Procedural Audio, Seamless Loops & Music (`.sfx` / `.kit` → `.wav`)
 Pure-DSP synthesis (PolyBLEP oscillators, stereo supersaws, FM, modal partials, Karplus-Strong plucks, 4 noise colors, Cytomic TPT SVF filters, Freeverb, tempo-synced ping-pong delay, 2-cycle pre-warm seamless looping, `--var N` variations) with visual spectrogram & loop-seam verification:
@@ -88,11 +101,11 @@ Macro layout stamps (`island`, `ridge`, `peak`, `plateau`, `valley`, `crater`, o
 
 ## Why Dullahan Artisan?
 
-- **Headless & Instant**: Single **~1.4 MB** static binary compiled from zero-dependency Rust (`std` only) — builds and runs natively on **Linux, macOS, and Windows** with millisecond startup.
+- **Headless & Instant**: Single **~1.7 MB** static binary compiled from zero-dependency Rust (`std` only) — builds and runs natively on **Linux, macOS, and Windows** with millisecond startup.
 - **Built for LLMs (No MCP Required)**: Compact line-oriented syntax with short opcodes, `$var` math expressions, semantic material/voice names, `@id` part tags (`--focus <id>` zoom inspection), shared 3D/audio kits (`use ../kit.mdl` / `use ../kit.kit`), CLI colorway overrides (`--ov old:new`), and `def`/`use`/`m=`/`rep=`/`rad=` composition — easy to read, diff, and patch directly via standard shell & file tools.
-- **Game-Engine Friendly**: Every opaque 3D model batches matte, metallic, and emissive surfaces into **1 single PBR draw call** using standard glTF 2.0 / Godot 4 / UE5 / Unity `BaseColor` + `ORM` + `Emissive` atlases (embed by default or share externally via `--ext-pal`), supports **Face-Weighted Normals (`wn=1`)** for razor-sharp 1-segment bevel specular highlights with zero normal maps, named **animated child nodes** (`node <name> x,y,z ... end` with local pivots), separate **collider nodes** (`col <name> ... end` for Godot `-colonly`/`-convcolonly` and Unreal `UBX_`/`UCX_`), double-sided foliage (`tri ds=1`, curved `rib`), and transparent edge alpha-bleed on SVG UI exports.
+- **Game-Engine Friendly**: Every opaque 3D model batches matte, metallic, and emissive surfaces into **1 single PBR draw call** using standard glTF 2.0 / Godot 4 / UE5 / Unity `BaseColor` + `ORM` + `Emissive` atlases (embed by default or share externally via `--ext-pal`), supports **Face-Weighted Normals (`wn=1`)** for razor-sharp 1-segment bevel specular highlights with zero normal maps, **native glTF 2.0 skeletal skinning (`skel`), 2-bone & FABRIK IK, keyframe animations with `extras.events`, and named blend shapes / morph targets (`morph`)**, nested **animated child nodes** (`node <name> x,y,z ... end` with local pivots), separate **collider nodes** (`col <name> ... end` for Godot `-colonly`/`-convcolonly` and Unreal `UBX_`/`UCX_`), double-sided foliage (`tri ds=1`, curved `rib`), and transparent edge alpha-bleed on SVG UI exports.
 - **Closed-Loop QA Built In**:
-  - **3D**: Multi-threaded 2×2 SSAA PBR software renderer with backface culling, PCF shadows, 2×2 turnarounds with grid/axis HUD, `--focus <id>` close-ups, and strict GLB/glTF validator (including per-triangle outward normal checks).
+  - **3D & Animation**: Multi-threaded 2×2 SSAA PBR software renderer with backface culling, PCF shadows, 2×2 turnarounds with grid/axis HUD, `--focus <id>` close-ups, `--bones` 4-view X-ray rig overlays, `--paths` 4-view motion-arc plots, `--anim-sheet` thumbnail strips with event badges, `--morph` expression previews, and strict GLB/glTF validator (checking outward normals, skin weights, morph targets, and animation channels).
   - **Audio**: Quantitative CLI telemetry (`peak`, `RMS`, `DC`, `clip`, `seam Δ`, 6-band balance) + 5-panel Magma spectrogram & ±25 ms loop-seam zoom PNG.
   - **2D UI / SVG**: Strict XML/path/ref/viewBox-overflow validator + 4-subscanline AA PNG rasterizer with checkerboard/grid/`--9slice` QA previews.
 
@@ -149,6 +162,11 @@ artisan mesh examples/models/fox_on_stones.mdl -o out/fox_on_stones.glb --render
 artisan mesh examples/models/workbench_tools.mdl -o out/workbench_tools.glb --ov red_paint:slate_blue --render out/workbench_blue.png --yaw 24 --pitch 24
 artisan mesh examples/models/modular_dungeon_kit.mdl -o out/modular_dungeon_kit.glb --render out/dungeon.png --turn out/dungeon_turn.png --yaw 28 --pitch 26
 artisan mesh examples/models/props_shotgun_medkit.mdl --focus medkit --render out/medkit_zoom.png
+
+# Compile rigged & animated .mdl (skeleton + IK + blend shapes) -> .glb + X-ray rig, motion paths & filmstrip QA
+artisan mesh examples/models/clockwork_automaton.mdl -o out/clockwork_automaton.glb --turn out/rig.png --bones
+artisan mesh examples/models/clockwork_automaton.mdl --anim walk --paths out/walk_paths.png --anim-sheet out/walk_sheet.png --frames 8
+artisan mesh examples/models/clockwork_automaton.mdl --focus head_unit --morph blink:1 --render out/blink.png
 
 # Synthesize one-shot variations or seamless loops + 5-panel diagnostic PNG
 artisan sfx examples/audio/footstep_gravel.sfx -o out/footstep_gravel.wav --var 4 --plot out/footstep_diag.png

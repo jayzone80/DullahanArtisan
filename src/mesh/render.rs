@@ -1,6 +1,7 @@
 use crate::common::font::Canvas;
 use crate::common::math::{linear_to_srgb, srgb_to_linear, Aabb, Vec2, Vec3};
 use crate::common::png::encode_rgba;
+use crate::mesh::anim::{compute_action_bounds, evaluate_pose, AnimAction};
 use crate::mesh::geom::{Mesh, Triangle};
 use crate::mesh::palette::Palette;
 
@@ -15,6 +16,7 @@ pub struct RenderOptions {
     pub ortho: bool,
     pub wireframe: bool,
     pub show_colliders: bool,
+    pub show_bones: bool,
     pub hud: bool,
     pub bg: [u8; 4],
     pub focus_bounds: Option<Aabb>,
@@ -33,6 +35,7 @@ impl Default for RenderOptions {
             ortho: false,
             wireframe: false,
             show_colliders: false,
+            show_bones: false,
             hud: false,
             bg: [212, 221, 232, 255],
             focus_bounds: None,
@@ -708,6 +711,63 @@ pub fn render_view_canvas(mesh: &Mesh, palette: &Palette, opts: &RenderOptions) 
         }
     }
 
+    // Optional X-ray octahedral bone rig overlay (--bones / --rig)
+    if opts.show_bones && !mesh.bones.is_empty() {
+        let wf_w = w as f32;
+        let wf_h = h as f32;
+        for b in &mesh.bones {
+            let nl = b.name.to_ascii_lowercase();
+            let mid_x = 0.5 * (b.head.x + b.tail.x);
+            let col = if nl.ends_with("_l") || nl.ends_with(".l") || nl.contains("left") || mid_x > 0.03 {
+                [60, 228, 255, 245] // Left: cyan
+            } else if nl.ends_with("_r") || nl.ends_with(".r") || nl.contains("right") || mid_x < -0.03 {
+                [255, 96, 134, 245] // Right: coral
+            } else {
+                [255, 218, 66, 245] // Center/Spine: gold
+            };
+            let dir = b.tail - b.head;
+            let len = dir.len().max(1e-4);
+            let axis = dir / len;
+            let up_ref = if axis.y.abs() < 0.85 { Vec3::Y } else { Vec3::X };
+            let r_ax = axis.cross(up_ref).normalized();
+            let u_ax = r_ax.cross(axis).normalized();
+            let collar_c = b.head + axis * (len * 0.20);
+            let collar_r = (len * 0.11).clamp(0.014, 0.065);
+            let ring = [
+                collar_c + r_ax * collar_r,
+                collar_c + u_ax * collar_r,
+                collar_c - r_ax * collar_r,
+                collar_c - u_ax * collar_r,
+            ];
+            let p_head = cam.project(b.head, wf_w, wf_h);
+            let p_tail = cam.project(b.tail, wf_w, wf_h);
+            let p_ring: [Option<(f32, f32, f32)>; 4] = [
+                cam.project(ring[0], wf_w, wf_h),
+                cam.project(ring[1], wf_w, wf_h),
+                cam.project(ring[2], wf_w, wf_h),
+                cam.project(ring[3], wf_w, wf_h),
+            ];
+            // Octahedral bone wireframe
+            for k in 0..4 {
+                if let (Some(h0), Some(rk)) = (p_head, p_ring[k]) {
+                    canvas.draw_line(h0.0 as i32, h0.1 as i32, rk.0 as i32, rk.1 as i32, col);
+                }
+                if let (Some(t0), Some(rk)) = (p_tail, p_ring[k]) {
+                    canvas.draw_line(t0.0 as i32, t0.1 as i32, rk.0 as i32, rk.1 as i32, col);
+                }
+                if let (Some(ra), Some(rb)) = (p_ring[k], p_ring[(k + 1) % 4]) {
+                    canvas.draw_line(ra.0 as i32, ra.1 as i32, rb.0 as i32, rb.1 as i32, col);
+                }
+            }
+            // Crisp head joint marker dot
+            if let Some(h0) = p_head {
+                let (cx, cy) = (h0.0 as i32, h0.1 as i32);
+                canvas.fill_rect(cx - 3, cy - 3, 7, 7, [14, 16, 22, 235]);
+                canvas.fill_rect(cx - 2, cy - 2, 5, 5, col);
+            }
+        }
+    }
+
     // Optional HUD: RGB orientation triad + telemetry label strip
     if opts.hud {
         draw_axis_triad(&mut canvas, &cam);
@@ -799,7 +859,8 @@ fn draw_axis_triad(canvas: &mut Canvas, cam: &Camera) {
 
 pub fn render_to_png(mesh: &Mesh, palette: &Palette, opts: &RenderOptions) -> Vec<u8> {
     let flat_owned;
-    let render_mesh = if mesh.nodes.is_empty() {
+    let has_active_morphs = mesh.morphs.iter().any(|m| m.default_weight.abs() > 1e-6);
+    let render_mesh = if mesh.nodes.is_empty() && !has_active_morphs {
         mesh
     } else {
         flat_owned = mesh.flattened_visual();
@@ -821,7 +882,8 @@ pub fn render_to_png(mesh: &Mesh, palette: &Palette, opts: &RenderOptions) -> Ve
 /// Render a 2x2 turntable contact sheet (`yaw`, `yaw+90`, `yaw+180`, `yaw+270`) with clean HUD footer.
 pub fn render_turntable_png(mesh: &Mesh, palette: &Palette, opts: &RenderOptions) -> Vec<u8> {
     let flat_owned;
-    let mesh = if mesh.nodes.is_empty() {
+    let has_active_morphs = mesh.morphs.iter().any(|m| m.default_weight.abs() > 1e-6);
+    let mesh = if mesh.nodes.is_empty() && !has_active_morphs {
         mesh
     } else {
         flat_owned = mesh.flattened_visual();
@@ -879,6 +941,306 @@ pub fn render_turntable_png(mesh: &Mesh, palette: &Palette, opts: &RenderOptions
         out.fill_rect(0, (cell_h * 2) as i32, total_w as i32, footer_h as i32, [16, 18, 22, 255]);
         out.draw_text(10, (cell_h * 2) as i32 + 7, &info, [220, 228, 240, 255], 1);
     }
+
+    encode_rgba(out.width as u32, out.height as u32, &out.rgba)
+}
+
+fn time_gradient_color(u: f32) -> [u8; 4] {
+    let u = u.clamp(0.0, 1.0);
+    // Cyan (t=0) -> Gold (t=0.5) -> Coral-Magenta (t=1)
+    if u < 0.5 {
+        let t = u * 2.0;
+        [
+            (40.0 + (255.0 - 40.0) * t) as u8,
+            (225.0 + (215.0 - 225.0) * t) as u8,
+            (255.0 + (60.0 - 255.0) * t) as u8,
+            255,
+        ]
+    } else {
+        let t = (u - 0.5) * 2.0;
+        [
+            (255.0 + (245.0 - 255.0) * t) as u8,
+            (215.0 + (75.0 - 215.0) * t) as u8,
+            (60.0 + (155.0 - 60.0) * t) as u8,
+            255,
+        ]
+    }
+}
+
+/// Render a 2x2 4-view animation debug turnaround with color-graded 3D motion paths,
+/// per-frame spacing dots, event rings, and onion-skin wireframe silhouettes at key poses.
+pub fn render_anim_paths_png(
+    mesh: &Mesh,
+    palette: &Palette,
+    action: &AnimAction,
+    tracked_nodes: &[String],
+    opts: &RenderOptions,
+) -> Vec<u8> {
+    let cell_w = opts.width.max(160);
+    let cell_h = opts.height.max(120);
+    let total_w = cell_w as usize * 2;
+    let footer_h = 22usize;
+    let total_h = cell_h as usize * 2 + footer_h;
+
+    let unified_bb = compute_action_bounds(mesh, action, 24);
+    let targets: Vec<String> = if tracked_nodes.is_empty() {
+        action.animated_targets()
+    } else {
+        tracked_nodes.to_vec()
+    };
+
+    // Sample uniform time steps along the action for motion-path curves + spacing dots
+    let sample_steps = ((action.duration * action.fps).round() as usize).clamp(16, 48);
+    let mut path_samples: Vec<Vec<(f32, Vec3)>> = vec![Vec::with_capacity(sample_steps + 1); targets.len()];
+    for s in 0..=sample_steps {
+        let u = s as f32 / sample_steps as f32;
+        let t = action.duration * u;
+        let (_, pivots) = evaluate_pose(mesh, action, t);
+        for (ti, name) in targets.iter().enumerate() {
+            if let Some(&pt) = pivots.get(name) {
+                path_samples[ti].push((u, pt));
+            }
+        }
+    }
+
+    // Sample event world positions (on first tracked target)
+    let mut event_pts: Vec<(Vec3, String)> = Vec::new();
+    if let Some(primary) = targets.first() {
+        for ev in &action.events {
+            let (_, pivots) = evaluate_pose(mesh, action, ev.time);
+            if let Some(&pt) = pivots.get(primary) {
+                event_pts.push((pt, ev.name.clone()));
+            }
+        }
+    }
+
+    // Base solid pose at t=0 + 3 ghosted onion-skin poses (skip static root mesh only on node-animated models)
+    let (base_pose, _) = evaluate_pose(mesh, action, 0.0);
+    let strip_static_root = mesh.bones.is_empty() && !mesh.nodes.is_empty();
+    let root_static_tris = mesh.tris.len();
+    let ghost_fracs = [0.25f32, 0.50, 0.75];
+    let ghosts: Vec<(f32, Mesh)> = ghost_fracs
+        .iter()
+        .map(|&u| {
+            let mut gm = evaluate_pose(mesh, action, action.duration * u).0;
+            if strip_static_root && root_static_tris > 0 && gm.tris.len() > root_static_tris {
+                gm.tris.drain(..root_static_tris);
+            }
+            (u, gm)
+        })
+        .collect();
+
+    let angles = [
+        (opts.yaw_deg, "VIEW 0 (+0)"),
+        (opts.yaw_deg + 90.0, "VIEW 1 (+90)"),
+        (opts.yaw_deg + 180.0, "VIEW 2 (+180)"),
+        (opts.yaw_deg + 270.0, "VIEW 3 (+270)"),
+    ];
+    let mut out = Canvas::new(total_w, total_h, [18, 20, 24, 255]);
+
+    for (idx, (yaw, name)) in angles.iter().enumerate() {
+        let mut sub = opts.clone();
+        sub.width = cell_w;
+        sub.height = cell_h;
+        sub.yaw_deg = *yaw;
+        sub.hud = true;
+        sub.focus_bounds = Some(unified_bb);
+        sub.label = Some(format!("{name} Y:{:.0} P:{:.0}", yaw % 360.0, sub.pitch_deg));
+
+        let mut cell = render_view_canvas(&base_pose, palette, &sub);
+        let cam = solve_auto_camera(&base_pose, &sub);
+        let wf = cell_w as f32;
+        let hf = cell_h as f32;
+
+        // Draw subtle onion-skin ghost wire silhouettes at intermediate poses
+        for (u, gmesh) in &ghosts {
+            let gc = time_gradient_color(*u);
+            let ghost_col = [gc[0], gc[1], gc[2], 95];
+            let step = (gmesh.tris.len() / 220).max(1);
+            for tri in gmesh.tris.iter().step_by(step) {
+                if let (Some(a), Some(b), Some(c)) = (
+                    cam.project(tri.a, wf, hf),
+                    cam.project(tri.b, wf, hf),
+                    cam.project(tri.c, wf, hf),
+                ) {
+                    cell.draw_line(a.0 as i32, a.1 as i32, b.0 as i32, b.1 as i32, ghost_col);
+                    cell.draw_line(b.0 as i32, b.1 as i32, c.0 as i32, c.1 as i32, ghost_col);
+                }
+            }
+        }
+
+        // Draw color-graded 3D motion-path curves + per-frame spacing dots
+        for samples in &path_samples {
+            for w in samples.windows(2) {
+                let (u0, p0) = w[0];
+                let (_, p1) = w[1];
+                if let (Some(s0), Some(s1)) = (cam.project(p0, wf, hf), cam.project(p1, wf, hf)) {
+                    let col = time_gradient_color(u0);
+                    let (x0, y0) = (s0.0 as i32, s0.1 as i32);
+                    let (x1, y1) = (s1.0 as i32, s1.1 as i32);
+                    cell.draw_line(x0, y0, x1, y1, col);
+                    cell.draw_line(x0 + 1, y0, x1 + 1, y1, col);
+                }
+            }
+            for &(u, pt) in samples {
+                if let Some(s) = cam.project(pt, wf, hf) {
+                    let col = time_gradient_color(u);
+                    let (cx, cy) = (s.0 as i32, s.1 as i32);
+                    cell.fill_rect(cx - 2, cy - 2, 5, 5, [18, 22, 30, 220]);
+                    cell.fill_rect(cx - 1, cy - 1, 3, 3, col);
+                }
+            }
+        }
+
+        // Draw gold diamond markers at animation event points
+        for (pt, _) in &event_pts {
+            if let Some(s) = cam.project(*pt, wf, hf) {
+                let (cx, cy) = (s.0 as i32, s.1 as i32);
+                let gold = [255, 228, 84, 255];
+                cell.draw_line(cx, cy - 5, cx + 5, cy, gold);
+                cell.draw_line(cx + 5, cy, cx, cy + 5, gold);
+                cell.draw_line(cx, cy + 5, cx - 5, cy, gold);
+                cell.draw_line(cx - 5, cy, cx, cy - 5, gold);
+            }
+        }
+
+        let ox = (idx % 2) * cell_w as usize;
+        let oy = (idx / 2) * cell_h as usize;
+        for y in 0..cell.height {
+            let src_start = y * cell.width * 4;
+            let dst_start = ((oy + y) * total_w + ox) * 4;
+            out.rgba[dst_start..dst_start + cell.width * 4]
+                .copy_from_slice(&cell.rgba[src_start..src_start + cell.width * 4]);
+        }
+    }
+
+    out.fill_rect(cell_w as i32 - 1, 0, 2, (cell_h * 2) as i32, [14, 16, 20, 255]);
+    out.fill_rect(0, cell_h as i32 - 1, total_w as i32, 2, [14, 16, 20, 255]);
+
+    let tracked_lbl = if targets.is_empty() {
+        "-".to_string()
+    } else {
+        targets.join(",")
+    };
+    let info = format!(
+        "ACTION: {}  DUR: {:.2}S  FPS: {:.0}  LOOP: {}  PATHS: {}  EVENTS: {}",
+        action.name.to_uppercase(),
+        action.duration,
+        action.fps,
+        if action.looping { 1 } else { 0 },
+        tracked_lbl.to_uppercase(),
+        action.events.len()
+    );
+    out.fill_rect(0, (cell_h * 2) as i32, total_w as i32, footer_h as i32, [16, 18, 22, 255]);
+    out.draw_text(10, (cell_h * 2) as i32 + 7, &info, [220, 228, 240, 255], 1);
+
+    encode_rgba(out.width as u32, out.height as u32, &out.rgba)
+}
+
+/// Render a compact, token-efficient thumbnail contact-sheet filmstrip across `frame_count` frames
+/// with unified camera framing, per-tile timestamps, and event badges.
+pub fn render_anim_sheet_png(
+    mesh: &Mesh,
+    palette: &Palette,
+    action: &AnimAction,
+    frame_count: usize,
+    opts: &RenderOptions,
+) -> Vec<u8> {
+    let n = frame_count.clamp(2, 24);
+    let cols = if n <= 4 { n } else { 4 };
+    let rows = (n + cols - 1) / cols;
+    let tile_w = if opts.width == 640 && opts.height == 480 {
+        180u32
+    } else {
+        opts.width.clamp(120, 320)
+    };
+    let tile_h = if opts.width == 640 && opts.height == 480 {
+        150u32
+    } else {
+        opts.height.clamp(96, 260)
+    };
+    let footer_h = 22usize;
+    let total_w = tile_w as usize * cols;
+    let total_h = tile_h as usize * rows + footer_h;
+
+    let unified_bb = compute_action_bounds(mesh, action, 24);
+    let mut out = Canvas::new(total_w, total_h, [18, 20, 24, 255]);
+
+    // Precompute frame timestamps; for looping actions space across [0..dur), else [0..dur]
+    let times: Vec<f32> = (0..n)
+        .map(|i| {
+            let denom = if action.looping { n as f32 } else { (n - 1).max(1) as f32 };
+            action.duration * (i as f32 / denom)
+        })
+        .collect();
+
+    for (idx, &t) in times.iter().enumerate() {
+        let (posed, _) = evaluate_pose(mesh, action, t);
+        let mut sub = opts.clone();
+        sub.width = tile_w;
+        sub.height = tile_h;
+        sub.hud = false;
+        sub.focus_bounds = Some(unified_bb);
+        let mut tile = render_view_canvas(&posed, palette, &sub);
+
+        // Top-left compact frame & timestamp badge
+        let badge = format!("F{:02} {:.2}S", idx, t);
+        tile.fill_rect(0, 0, (badge.len() as i32) * 6 + 8, 13, [16, 18, 24, 200]);
+        tile.draw_text(4, 3, &badge, [225, 232, 242, 255], 1);
+
+        // Attach any event whose timestamp falls closest to this frame slot
+        let half_step = (action.duration / n as f32) * 0.55;
+        let ev_hits: Vec<&str> = action
+            .events
+            .iter()
+            .filter(|ev| {
+                let d = (ev.time - t).abs();
+                let wrap_d = if action.looping {
+                    (action.duration - d).abs()
+                } else {
+                    d
+                };
+                d.min(wrap_d) <= half_step
+            })
+            .map(|ev| ev.name.as_str())
+            .collect();
+        if !ev_hits.is_empty() {
+            let ev_lbl = format!("EV:{}", ev_hits.join(",")).to_uppercase();
+            let max_chars = ((tile_w as usize).saturating_sub(8) / 6).max(4);
+            let shown: String = ev_lbl.chars().take(max_chars).collect();
+            tile.fill_rect(0, tile_h as i32 - 14, tile_w as i32, 14, [32, 26, 10, 215]);
+            tile.draw_text(4, tile_h as i32 - 11, &shown, [255, 218, 72, 255], 1);
+        }
+
+        let ox = (idx % cols) * tile_w as usize;
+        let oy = (idx / cols) * tile_h as usize;
+        for y in 0..tile.height {
+            let src_start = y * tile.width * 4;
+            let dst_start = ((oy + y) * total_w + ox) * 4;
+            out.rgba[dst_start..dst_start + tile.width * 4]
+                .copy_from_slice(&tile.rgba[src_start..src_start + tile.width * 4]);
+        }
+    }
+
+    // Crisp tile borders
+    for c in 1..cols {
+        out.fill_rect((c * tile_w as usize) as i32 - 1, 0, 2, (rows * tile_h as usize) as i32, [14, 16, 20, 255]);
+    }
+    for r in 1..rows {
+        out.fill_rect(0, (r * tile_h as usize) as i32 - 1, total_w as i32, 2, [14, 16, 20, 255]);
+    }
+
+    let info = format!(
+        "SHEET: {}  FRAMES: {}  DUR: {:.2}S  FPS: {:.0}  LOOP: {}  EVENTS: {}",
+        action.name.to_uppercase(),
+        n,
+        action.duration,
+        action.fps,
+        if action.looping { 1 } else { 0 },
+        action.events.len()
+    );
+    out.fill_rect(0, (rows * tile_h as usize) as i32, total_w as i32, footer_h as i32, [16, 18, 22, 255]);
+    out.draw_text(8, (rows * tile_h as usize) as i32 + 7, &info, [220, 228, 240, 255], 1);
 
     encode_rgba(out.width as u32, out.height as u32, &out.rgba)
 }

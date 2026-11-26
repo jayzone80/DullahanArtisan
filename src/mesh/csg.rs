@@ -373,6 +373,8 @@ fn polygons_to_mesh(polys: Vec<Polygon>) -> Mesh {
                 face_normal: n,
                 uv: p.uv,
                 is_translucent: p.is_translucent,
+                rigid_bone: None,
+                part_tag: None,
             });
         }
     }
