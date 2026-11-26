@@ -21,6 +21,9 @@ use dullahan_artisan::terrain::mesher::{build_terrain_mesh, TerrainMeshOptions};
 use dullahan_artisan::terrain::parser::load_terrain_file;
 use dullahan_artisan::terrain::preview::render_terrain_preview_png;
 use dullahan_artisan::terrain::sim::{build_from_heightmap_png, simulate_terrain};
+use dullahan_artisan::tex::bake::bake_texture;
+use dullahan_artisan::tex::parser::{load_tex_file, NormalConvention};
+use dullahan_artisan::tex::preview::render_tex_preview_png;
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -34,9 +37,10 @@ fn main() -> ExitCode {
         "sfx" | "audio" => cmd_sfx(&args[1..]),
         "svg" | "ui" => cmd_svg(&args[1..]),
         "terrain" | "ter" => cmd_terrain(&args[1..]),
+        "tex" | "texture" | "bake" => cmd_tex(&args[1..]),
         "validate" | "val" => cmd_validate(&args[1..]),
         "spec" => cmd_spec(&args[1..]),
-        other => Err(format!("unknown subcommand '{other}' (use: pal, mesh, sfx, svg, terrain, validate, spec)")),
+        other => Err(format!("unknown subcommand '{other}' (use: pal, mesh, sfx, svg, terrain, tex, validate, spec)")),
     };
     match res {
         Ok(()) => ExitCode::SUCCESS,
@@ -995,6 +999,115 @@ fn cmd_terrain(args: &[String]) -> Result<(), String> {
     Ok(())
 }
 
+fn cmd_tex(args: &[String]) -> Result<(), String> {
+    let mut input: Option<PathBuf> = None;
+    let mut pal_override: Option<PathBuf> = None;
+    let mut out_prefix: Option<String> = None;
+    let mut preview_png: Option<PathBuf> = None;
+    let mut size_override: Option<(u32, u32)> = None;
+    let mut normal_override: Option<NormalConvention> = None;
+    let mut seed_override: Option<u64> = None;
+    let mut show_grid = false;
+
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
+            "-h" | "--help" => {
+                print_usage();
+                return Ok(());
+            }
+            "-p" | "--pal" | "--palette" => {
+                i += 1;
+                pal_override = Some(PathBuf::from(args.get(i).ok_or("-p requires palette path")?));
+            }
+            "-o" | "--out" => {
+                i += 1;
+                out_prefix = Some(args.get(i).ok_or("-o requires output prefix")?.clone());
+            }
+            "--preview" => {
+                i += 1;
+                preview_png = Some(PathBuf::from(args.get(i).ok_or("--preview requires png path")?));
+            }
+            "--size" => {
+                i += 1;
+                let s = args.get(i).ok_or("--size requires N or WxH")?;
+                if s.contains('x') || s.contains('X') {
+                    size_override = Some(parse_size(s)?);
+                } else {
+                    let n: u32 = s.parse().map_err(|_| format!("bad --size '{s}'"))?;
+                    size_override = Some((n, n));
+                }
+            }
+            "--dx" | "--directx" => normal_override = Some(NormalConvention::DirectX),
+            "--gl" | "--opengl" => normal_override = Some(NormalConvention::OpenGL),
+            "--grid" => show_grid = true,
+            "--seed" => {
+                i += 1;
+                seed_override = Some(args.get(i).ok_or("--seed requires u64")?.parse().map_err(|_| "bad --seed")?);
+            }
+            a if !a.starts_with('-') && input.is_none() => input = Some(PathBuf::from(a)),
+            other => return Err(format!("unknown tex arg '{other}'")),
+        }
+        i += 1;
+    }
+
+    let in_path = input.ok_or("tex requires <file.tex>")?;
+    let mut spec = load_tex_file(&in_path)?;
+    if let Some((w, h)) = size_override {
+        spec.width = w.max(32);
+        spec.height = h.max(32);
+    }
+    if let Some(nc) = normal_override {
+        spec.normal_conv = nc;
+    }
+    if let Some(sd) = seed_override {
+        spec.seed = sd;
+    }
+
+    let baked = bake_texture(&spec, pal_override.as_deref())?;
+
+    let mut maps_info = String::new();
+    if let Some(ref prefix) = out_prefix {
+        let bc_p = PathBuf::from(format!("{prefix}_basecolor.png"));
+        let nm_p = PathBuf::from(format!("{prefix}_normal.png"));
+        let ht_p = PathBuf::from(format!("{prefix}_height.png"));
+        let orm_p = PathBuf::from(format!("{prefix}_orm.png"));
+        ensure_parent(&bc_p)?;
+        let bc_b = baked.encode_basecolor_png();
+        let nm_b = baked.encode_normal_png();
+        let ht_b = baked.encode_height16_png();
+        let orm_b = baked.encode_orm_png();
+        std::fs::write(&bc_p, &bc_b).map_err(|e| format!("write basecolor: {e}"))?;
+        std::fs::write(&nm_p, &nm_b).map_err(|e| format!("write normal: {e}"))?;
+        std::fs::write(&ht_p, &ht_b).map_err(|e| format!("write height: {e}"))?;
+        std::fs::write(&orm_p, &orm_b).map_err(|e| format!("write orm: {e}"))?;
+        let kb = (bc_b.len() + nm_b.len() + ht_b.len() + orm_b.len()) as f64 / 1024.0;
+        maps_info = format!(" maps={kb:.1}KB->{prefix}_{{basecolor,normal,height,orm}}.png");
+    }
+
+    if let Some(ref pp) = preview_png {
+        ensure_parent(pp)?;
+        let png = render_tex_preview_png(&baked, show_grid);
+        std::fs::write(pp, png).map_err(|e| format!("write tex preview: {e}"))?;
+    }
+
+    println!(
+        "OK tex {} {}x{} wrap={} tris={} seam_a={:.4} seam_n={:.4} seam_h={:.4} ao=[{:.2}..{:.2}]{} valid=PASS",
+        baked.name,
+        baked.width,
+        baked.height,
+        baked.wrap.label(),
+        baked.tri_count,
+        baked.seam_albedo,
+        baked.seam_normal,
+        baked.seam_height,
+        baked.ao_min,
+        baked.ao_max,
+        maps_info
+    );
+    Ok(())
+}
+
 fn cmd_validate(args: &[String]) -> Result<(), String> {
     let mut path: Option<PathBuf> = None;
     let mut expect_loop = false;
@@ -1085,8 +1198,10 @@ USAGE:
                   [--grid N] [--tris N] [--skirt 0|1] [--smooth 0|1] [--col <node>] [--seed S]
   artisan terrain --from-heightmap <h.png> [--weightmap <w.png>] [-p <pal>] [--world W,H,D]
                   [--mesh <out.glb|.gltf>] [--render <3d.png>] [--preview <diag.png>] [--grid N] [--tris N]
+  artisan tex <file.tex> [-p <pal>] [-o <prefix>] [--preview <qa.png>]
+              [--size N|WxH] [--gl|--dx] [--grid] [--seed S]
   artisan validate <file.glb|.gltf|.wav|.svg> [--loop]
-  artisan spec [pal|mesh|sfx|svg|terrain]"#
+  artisan spec [pal|mesh|sfx|svg|terrain|tex]"#
     );
 }
 
@@ -1218,6 +1333,23 @@ Splats:    splat <r|g|b|a> <mat_name> [h=0..1] [slope=0..90] [flow=0..1] [w=1] [
 Outputs:   -o <prefix> -> _height16.png (16-bit lossless), _splat.png (RGBA), _normal.png (RGB)
            --preview -> 2x2 QA sheet (hillshade, elevation heatmap, flow/erosion, biome splatmap)
            --mesh out.glb [--grid 64] [--tris 2500] [--skirt 1] [--col terrain-colonly]"#
+        );
+    }
+    if topic == "all" || topic == "tex" {
+        println!(
+            r#"=== TEX (.tex) — Seamless 3D-to-2D PBR texture & trim-sheet baker + SVG detail layering ===
+Header:    tex <name> [size=1024] [tile=2,2] [depth=.2] [wrap=xy|x|y|none] [normal=gl|dx] [ao_rad=.14] [ao_str=1] [vary=.05] [seed=42]
+           pal <rel.pal>  |  $var = expr
+3D Relief: mesh <rel.mdl>   OR   mesh ... end  (full .mdl relief; X in [-tile_w/2..+tile_w/2], Y in [-tile_h/2..+tile_h/2], +Z toward camera; auto-wrapped!)
+           stones [rows=6] [cols=4] mats=m1,m2,... [mortar=m] [gap=.03] [bev=.022] [h=.08..0.14] [tilt=3] [stagger=.5] [jx=.14] [jy=.08] [y=y0..y1] [vary=.06]
+Details:   (100% tile-wrapped & geometry-aware via baked height, HBAO, curvature & normals!)
+           grain  [scale=16] [amp=.06] [rough=.08] [bump=.004] [mask=all|cavity|edge|up|high|low] [seed=11]
+           edge   [#hex] [str=.45] [thresh=.14] [chip=.35] [rough=.88] [bump=-.004] [scale=14] [seed=22]
+           cavity [#hex] [str=.55] [depth=.45] [rough=.96]
+           moss   [#hex] [alt=#hex] [str=.85] [cov=.48] [up=.65] [cav=.78] [y=y0..y1] [rough=.94] [bump=.006] [scale=6] [seed=33]
+           svg    <rel.svg> [blend=over|mul|add|screen|height] [opacity=1] [mask=all|cavity|edge|up|high|low] [rough=] [metal=] [height=0] [blur=1.2] [ao=.55]
+Outputs:   -o <prefix> -> _basecolor.png, _normal.png (GL +Y or DX -Y), _height.png (16-bit), _orm.png (R=HBAO, G=Rough, B=Metal)
+           --preview -> 2x2 QA sheet (tiled PBR w/ optional --grid seams, 3D PBR sphere/pillar, normal map, height|AO split)"#
         );
     }
     Ok(())

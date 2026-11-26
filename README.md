@@ -97,6 +97,14 @@ Macro layout stamps (`island`, `ridge`, `peak`, `plateau`, `valley`, `crater`, o
 | ![Highland Cove 3D Terrain](docs/showcase/highland_cove_3d.png) | ![Highland Cove Diagnostics](docs/showcase/highland_cove_diag.png) |
 | [`highland_cove.ter`](examples/terrain/highland_cove.ter) | [`highland_cove.ter`](examples/terrain/highland_cove.ter) |
 
+### Seamless 1K PBR Textures & Architectural Trim Sheets (`.tex` + `.svg` → Albedo + Normal + Height16 + ORM)
+Sculpt seamlessly tileable 3D reliefs (`mesh` + beveled `wn=1` `stones`, auto-wrapped toroidally across `wrap=xy` or `wrap=x` for trim sheets), orthographically bake **2×2 SSAA Albedo, Tangent-Space Normal (OpenGL `+Y` or DirectX `-Y`), 16-bit Displacement, and Horizon-Based AO + ORM**, and layer geometry-masked procedural weathering (`grain`, `edge` chipping, `cavity` grime, `moss`) plus **seamlessly wrapped `.svg` vector cracks, moss tufts, and carved bas-relief friezes** that sculpt directly into the normal map, heightmap, and AO:
+
+| 1K Mossy Stone Wall (`wrap=xy`, `seam=0.000`, 3D PBR Sphere) | 1K Matching Stone Trim Sheet (`wrap=x`, Carved SVG Frieze, 3D Pillar) |
+| :---: | :---: |
+| ![Mossy Stone Wall PBR QA](docs/showcase/mossy_stone_wall_qa.png) | ![Medieval Stone Trim Sheet PBR QA](docs/showcase/medieval_stone_trim_qa.png) |
+| [`mossy_stone_wall.tex`](examples/textures/mossy_stone_wall.tex) + [cracks](examples/textures/wall_cracks_chips.svg) / [moss](examples/textures/wall_moss_tufts.svg) | [`medieval_stone_trim.tex`](examples/textures/medieval_stone_trim.tex) + [carved frieze](examples/textures/trim_carvings.svg) |
+
 ---
 
 ## Why Dullahan Artisan?
@@ -181,6 +189,10 @@ artisan terrain examples/terrain/highland_cove.ter -o out/highland_cove --previe
 
 # Or convert an external heightmap + weightmap PNG directly into a low-poly .glb mesh
 artisan terrain --from-heightmap out/highland_cove_height16.png --weightmap out/highland_cove_splat.png -p examples/palette.pal --world 120,24,120 --tris 2400 --mesh out/from_hm.glb
+
+# Bake 1K seamless PBR tileable textures & horizontal architectural trim sheets (Albedo + Normal + Height16 + ORM + 2x2 QA)
+artisan tex examples/textures/mossy_stone_wall.tex -o out/mossy_stone_wall --preview out/wall_qa.png --grid
+artisan tex examples/textures/medieval_stone_trim.tex -o out/medieval_stone_trim --preview out/trim_qa.png --grid --dx
 
 # Print the canonical DSL & SVG grammar straight from the binary
 artisan spec

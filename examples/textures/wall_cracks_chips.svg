@@ -1,0 +1,53 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <!-- Seamless stylized hairline stone cracks, branching fractures & chisel chips -->
+  <g fill="none" stroke="#1e1a16" stroke-linecap="round" stroke-linejoin="round">
+    <!-- Upper-left branching crack -->
+    <path d="M 110 86 L 146 118 L 168 162 L 204 192" stroke-width="4.5" opacity="0.9"/>
+    <path d="M 146 118 L 188 104 L 218 116" stroke-width="2.6" opacity="0.75"/>
+    <path d="M 168 162 L 148 202" stroke-width="2.2" opacity="0.7"/>
+
+    <!-- Top-right fracture crossing edge seamlessly -->
+    <path d="M 790 64 L 845 95 L 912 88 L 980 128 L 1048 112" stroke-width="4.0" opacity="0.85"/>
+    <path d="M 845 95 L 870 144 L 856 178" stroke-width="2.5" opacity="0.75"/>
+
+    <!-- Mid-left diagonal stress crack -->
+    <path d="M 285 332 L 328 368 L 352 420 L 392 448" stroke-width="4.8" opacity="0.92"/>
+    <path d="M 328 368 L 372 356 L 408 370" stroke-width="2.8" opacity="0.78"/>
+    <path d="M 352 420 L 326 458" stroke-width="2.3" opacity="0.68"/>
+
+    <!-- Center-right weathered fissure -->
+    <path d="M 624 276 L 664 314 L 688 358 L 732 374" stroke-width="4.2" opacity="0.88"/>
+    <path d="M 664 314 L 642 356" stroke-width="2.4" opacity="0.72"/>
+
+    <!-- Lower-mid long crack -->
+    <path d="M 162 588 L 212 612 L 248 656 L 298 672 L 326 704" stroke-width="4.5" opacity="0.9"/>
+    <path d="M 212 612 L 238 574" stroke-width="2.4" opacity="0.7"/>
+    <path d="M 248 656 L 222 694" stroke-width="2.2" opacity="0.68"/>
+
+    <!-- Right-side chiselled split -->
+    <path d="M 744 548 L 788 584 L 828 578 L 874 614" stroke-width="4.2" opacity="0.85"/>
+    <path d="M 788 584 L 802 634" stroke-width="2.4" opacity="0.72"/>
+
+    <!-- Bottom-center fracture -->
+    <path d="M 468 776 L 512 814 L 538 866 L 584 892" stroke-width="4.8" opacity="0.9"/>
+    <path d="M 512 814 L 558 802 L 592 818" stroke-width="2.6" opacity="0.75"/>
+
+    <!-- Bottom-right subtle seam crack -->
+    <path d="M 852 846 L 896 882 L 934 924" stroke-width="3.8" opacity="0.82"/>
+    <path d="M 98 868 L 142 902 L 166 946" stroke-width="3.6" opacity="0.8"/>
+
+    <!-- Fine secondary chisel scratches & stone pitting -->
+    <path d="M 480 142 L 518 158 M 506 492 L 548 514 M 48 446 L 94 468 M 912 372 L 954 394 M 392 924 L 434 948" stroke-width="2.2" opacity="0.58"/>
+  </g>
+
+  <!-- Stylized chipped spall facets (subtle gouges) -->
+  <g fill="#2b2620" opacity="0.62">
+    <polygon points="154,174 176,166 170,188"/>
+    <polygon points="338,378 360,372 350,396"/>
+    <polygon points="674,324 696,318 686,340"/>
+    <polygon points="222,624 244,616 238,638"/>
+    <polygon points="522,824 544,818 534,840"/>
+    <polygon points="796,594 818,588 808,610"/>
+    <polygon points="860,104 880,98 872,118"/>
+  </g>
+</svg>

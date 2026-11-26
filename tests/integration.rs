@@ -647,3 +647,31 @@ end
     let sheet = render_anim_sheet_png(&parsed.mesh, &pal, &parsed.mesh.actions[0], 6, &RenderOptions::default());
     assert!(inspect_and_verify_png(&sheet).is_ok());
 }
+
+#[test]
+fn seamless_pbr_texture_and_trim_bake_with_svg_overlay() {
+    use dullahan_artisan::tex::bake::bake_texture;
+    use dullahan_artisan::tex::parser::load_tex_file;
+    use dullahan_artisan::tex::preview::render_tex_preview_png;
+
+    for path in [
+        "examples/textures/mossy_stone_wall.tex",
+        "examples/textures/medieval_stone_trim.tex",
+    ] {
+        let mut spec = load_tex_file(Path::new(path)).unwrap();
+        spec.width = 256;
+        spec.height = 256;
+        let baked = bake_texture(&spec, None).unwrap();
+        assert_eq!((baked.width, baked.height), (256, 256));
+        assert!(baked.seam_albedo < 0.015, "{path} albedo seam too high: {}", baked.seam_albedo);
+        assert!(baked.seam_normal < 0.05, "{path} normal seam too high: {}", baked.seam_normal);
+        assert!(baked.seam_height < 0.015, "{path} height seam too high: {}", baked.seam_height);
+        assert!(baked.ao_min < 0.75, "{path} expected real HBAO darkening, got min={}", baked.ao_min);
+
+        assert!(inspect_and_verify_png(&baked.encode_basecolor_png()).is_ok());
+        assert!(inspect_and_verify_png(&baked.encode_normal_png()).is_ok());
+        assert!(inspect_and_verify_png(&baked.encode_height16_png()).is_ok());
+        assert!(inspect_and_verify_png(&baked.encode_orm_png()).is_ok());
+        assert!(inspect_and_verify_png(&render_tex_preview_png(&baked, true)).is_ok());
+    }
+}

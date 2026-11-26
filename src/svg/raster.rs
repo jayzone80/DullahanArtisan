@@ -164,6 +164,36 @@ fn alpha_bleed(rgba: &mut [u8], w: usize, h: usize) {
     }
 }
 
+/// Render an SVG document directly to straight 8-bit RGBA (`width * height * 4`),
+/// optionally wrapping across tile boundaries (`wrap_x`, `wrap_y`) so strokes and shapes
+/// extending past the `viewBox` tile seamlessly onto the opposite edge.
+pub fn render_svg_rgba_tiled(
+    doc: &SvgDocument,
+    width: u32,
+    height: u32,
+    wrap_x: bool,
+    wrap_y: bool,
+) -> Vec<u8> {
+    let w = width.max(1) as usize;
+    let h = height.max(1) as usize;
+    let (vb_x, vb_y, vb_w, vb_h) = doc.view_box;
+    let sx = w as f64 / vb_w.max(1e-6);
+    let sy = h as f64 / vb_h.max(1e-6);
+    let scale = sx.min(sy);
+
+    let mut surf = Surface::new(w, h);
+    let x_offs: &[f64] = if wrap_x { &[-vb_w, 0.0, vb_w] } else { &[0.0] };
+    let y_offs: &[f64] = if wrap_y { &[-vb_h, 0.0, vb_h] } else { &[0.0] };
+
+    for &oy in y_offs {
+        for &ox in x_offs {
+            let tf = Affine::scale(sx, sy).mul(Affine::translate(-vb_x + ox, -vb_y + oy));
+            render_items(doc, &doc.items, tf, scale, &mut surf);
+        }
+    }
+    surf.to_rgba_u8(false)
+}
+
 /// Render an SVG document to PNG bytes (transparent RGBA or solid background).
 pub fn render_svg_png(doc: &SvgDocument, opts: &SvgRenderOptions) -> Vec<u8> {
     let w = opts.width.max(1) as usize;

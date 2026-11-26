@@ -1,0 +1,35 @@
+# 1K Seamless Stylized Mossy Medieval Stone Wall (PBR Albedo + Normal + Height16 + ORM)
+# Demonstrates: 3D beveled wn=1 stone relief + toroidal XY wrap + HBAO + curvature edge-wear + procedural & SVG moss/cracks
+tex mossy_stone_wall size=1024 tile=2,2 depth=0.18 wrap=xy normal=gl ao_rad=0.15 ao_str=1.15 vary=0.08 seed=42
+pal ../palette.pal
+
+# 1. Staggered 3D chamfered beveled masonry courses (auto-wrapped seamlessly across XY!)
+stones rows=6 cols=4 mats=stone_mid,stone_light,stone_dark,stone_mid mortar=dirt_dark gap=0.036 bev=0.028 h=0.085..0.135 tilt=3.2 stagger=0.5 jx=0.18 jy=0.09 vary=0.14 seed=42
+
+# 2. Extra recessed filler cobbles nestled inside wider mortar junctions (3D relief!)
+mesh
+  ico stone_dark  -0.46,0.50,0.032 0.048 sub=1 jit=0.22 sm=1 seed=11
+  ico stone_mid   0.34,-0.16,0.030 0.044 sub=1 jit=0.22 sm=1 seed=23
+  ico stone_dark  0.78,-0.66,0.032 0.046 sub=1 jit=0.22 sm=1 seed=37
+  ico stone_mid   -0.82,-0.32,0.030 0.042 sub=1 jit=0.22 sm=1 seed=49
+end
+
+# 3. Geometry-aware PBR detail & SVG overlay stack (100% periodic seamless!)
+# Fine hand-hewn stone micro-grain & subtle roughness breakup
+grain  scale=18 amp=0.075 rough=0.09 bump=0.0045 mask=high seed=11
+grain  scale=36 amp=0.045 rough=0.06 bump=0.0022 mask=all  seed=19
+
+# Weathered light highlights + micro-chipping along convex beveled stone edges
+edge   #dfd8c8 str=0.52 thresh=0.12 chip=0.42 rough=0.86 bump=-0.0045 scale=14 seed=22
+
+# Deep earthy shadow & grime inside mortar joints
+cavity #211d18 str=0.68 depth=0.42 rough=0.97
+
+# Vector SVG hairline cracks & chisel spalls carved into stone faces (carves Height + Normal + AO!)
+svg    wall_cracks_chips.svg blend=mul opacity=0.78 mask=high rough=0.95 height=-0.011 blur=1.4 ao=0.85
+
+# Organic procedural moss growing out of mortar crevices & upward-facing stone ledges
+moss   #48692c alt=#738e3a str=0.86 cov=0.46 up=0.78 cav=0.88 rough=0.94 bump=0.007 scale=6 seed=33
+
+# Stylized SVG leafy moss clusters & pale sage lichen rosettes
+svg    wall_moss_tufts.svg blend=over opacity=0.82 mask=cavity rough=0.95 height=0.006 blur=1.8 ao=0.25

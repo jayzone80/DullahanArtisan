@@ -1,0 +1,58 @@
+# 1K Matching Medieval Stone Architectural Trim Sheet (Horizontal wrap=x, PBR Albedo + Normal + Height16 + ORM)
+# Matches `mossy_stone_wall.tex` palette & weathering!
+# Bands (top -> bottom):
+#   1. Gothic cornice cap + 3D beveled dentil blocks
+#   2. Carved stone frieze (bas-relief SVG gothic diamonds & rosettes carved into height + normal + AO!)
+#   3. Forged iron & verdigris copper architectural strapping band with 3D domed rivets
+#   4. Two courses of chamfered dressed ashlar dado blocks
+#   5. Heavy beveled base plinth with creeping ground moss
+tex medieval_stone_trim size=1024 tile=2,2 depth=0.20 wrap=x normal=gl ao_rad=0.14 ao_str=1.15 vary=0.06 seed=55
+pal ../palette.pal
+
+# 1. Architectural 3D Relief Bands (all X-wrapped seamlessly across [-1.0..+1.0]!)
+mesh
+  # Recessed dark mortar & shadow backing plane
+  box dirt_dark     0,0.00,-0.01   2.20,2.10,0.02
+
+  # --- BAND 1 (Y = +0.58 .. +1.00): Sculpted Gothic Cornice & Dentil Molding ---
+  # Heavy beveled top cornice cap (width 2.12 > tile_w + 2*bev so horizontal molding is 100% seamless!)
+  box stone_light   0,0.91,0.080   2.12,0.16,0.160 bev=0.026 wn=1
+  # Stepped mid cornice ledge
+  box stone_mid     0,0.78,0.060   2.12,0.10,0.120 bev=0.018 wn=1
+  # Recessed dentil channel + 10 repeating 3D beveled dentil blocks (exact period 2.0/10 = 0.20!)
+  box stone_dark    0,0.66,0.022   2.12,0.14,0.044 bev=0.008 wn=1
+  box stone_light  -0.90,0.66,0.068 0.115,0.105,0.095 bev=0.014 wn=1 rep=10:0.20,0,0
+  # Lower cornice lip rail
+  box stone_mid     0,0.57,0.048   2.12,0.048,0.096 bev=0.010 wn=1
+
+  # --- BAND 2 (Y = +0.10 .. +0.54): Dressed Frieze Backing Panel (receives SVG bas-relief carvings!) ---
+  box stone_light   0,0.32,0.056   2.12,0.42,0.112 bev=0.016 wn=1
+
+  # --- BAND 3 (Y = -0.14 .. +0.08): Forged Iron & Patina Copper Strapping Band + 3D Rivets ---
+  box iron_dark     0,-0.03,0.054  2.12,0.20,0.108 bev=0.016 wn=1
+  box copper_patina 0,-0.03,0.094  2.12,0.072,0.038 bev=0.008 wn=1
+  # 8 repeating 3D iron & brass architectural rivets along top & bottom of iron strap (period 2.0/8 = 0.25!)
+  cyl brass_gold   -0.875,0.035,0.108 0.024,0.016,0.026 r=90,0,0 seg=12 bev=0.004 wn=1 rep=8:0.25,0,0
+  cyl brass_gold   -0.875,-0.095,0.108 0.024,0.016,0.026 r=90,0,0 seg=12 bev=0.004 wn=1 rep=8:0.25,0,0
+  # Vertical iron strap seams every 0.50m (4 panels)
+  box steel_mid    -0.75,-0.03,0.102 0.028,0.19,0.032 bev=0.005 wn=1 rep=4:0.50,0,0
+
+  # --- BAND 5 (Y = -1.00 .. -0.66): Heavy Chamfered Base Plinth ---
+  box stone_mid     0,-0.69,0.068  2.12,0.085,0.136 bev=0.018 wn=1
+  box stone_dark    0,-0.87,0.088  2.12,0.26,0.176 bev=0.030 wn=1
+end
+
+# --- BAND 4 (Y = -0.63 .. -0.16): Two Matching Chamfered Ashlar Dado Courses ---
+stones rows=2 cols=4 mats=stone_mid,stone_light,stone_dark,stone_mid gap=0.028 bev=0.022 h=0.085..0.115 tilt=1.8 stagger=0.5 jx=0.10 jy=0.04 y=-0.63..-0.16 vary=0.11 seed=77
+
+# 2. Geometry-Aware PBR Detail & Carved SVG Relief Stack
+grain  scale=20 amp=0.055 rough=0.07 bump=0.0032 mask=high seed=15
+edge   #e2dccd str=0.48 thresh=0.12 chip=0.32 rough=0.84 bump=-0.0035 scale=16 seed=29
+cavity #1f1b17 str=0.62 depth=0.38 rough=0.96
+
+# Carved Gothic Bas-Relief Frieze & Dado Cracks (sculpted directly into Height16 + Normal + AO!)
+svg    trim_carvings.svg blend=mul opacity=0.72 mask=high rough=0.94 height=-0.015 blur=1.6 ao=0.95
+
+# Lush moss creeping along the bottom base plinth & cornice crevices
+moss   #46672b alt=#6f8b38 str=0.85 cov=0.58 up=0.80 cav=0.85 y=-1.00..-0.58 rough=0.94 bump=0.006 scale=7 seed=41
+moss   #4c6d30 alt=#75903d str=0.65 cov=0.32 up=0.90 cav=0.80 y=0.50..0.98  rough=0.94 bump=0.004 scale=8 seed=53

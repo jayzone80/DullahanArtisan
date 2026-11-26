@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <!-- Horizontal-tiling medieval carved stone bas-relief frieze (y=238..444) + subtle weathered dado grooves -->
+  <!-- Designed for wrap=x (tile repeats cleanly every 256px across 1024px width!) -->
+  <g fill="none" stroke="#221e19" stroke-linecap="round" stroke-linejoin="round">
+    <!-- Top & bottom recessed frieze framing rails -->
+    <line x1="0" y1="248" x2="1024" y2="248" stroke-width="9"/>
+    <line x1="0" y1="436" x2="1024" y2="436" stroke-width="9"/>
+    <line x1="0" y1="264" x2="1024" y2="264" stroke-width="3.5" opacity="0.75"/>
+    <line x1="0" y1="420" x2="1024" y2="420" stroke-width="3.5" opacity="0.75"/>
+
+    <!-- Repeating carved gothic diamond-and-rosette frieze (4 exact tiles @ 256px) -->
+    <!-- Tile 1: x=0..256 -->
+    <polygon points="128,278 228,342 128,406 28,342" stroke-width="8"/>
+    <polygon points="128,298 196,342 128,386 60,342" stroke-width="4.5" opacity="0.85"/>
+    <circle cx="128" cy="342" r="20" stroke-width="6"/>
+    <circle cx="0" cy="342" r="24" stroke-width="6.5"/>
+    <path d="M 12 278 L 42 296 M 12 406 L 42 388 M 244 278 L 214 296 M 244 406 L 214 388" stroke-width="5"/>
+
+    <!-- Tile 2: x=256..512 -->
+    <polygon points="384,278 484,342 384,406 284,342" stroke-width="8"/>
+    <polygon points="384,298 452,342 384,386 316,342" stroke-width="4.5" opacity="0.85"/>
+    <circle cx="384" cy="342" r="20" stroke-width="6"/>
+    <circle cx="256" cy="342" r="24" stroke-width="6.5"/>
+    <path d="M 268 278 L 298 296 M 268 406 L 298 388 M 500 278 L 470 296 M 500 406 L 470 388" stroke-width="5"/>
+
+    <!-- Tile 3: x=512..768 -->
+    <polygon points="640,278 740,342 640,406 540,342" stroke-width="8"/>
+    <polygon points="640,298 708,342 640,386 572,342" stroke-width="4.5" opacity="0.85"/>
+    <circle cx="640" cy="342" r="20" stroke-width="6"/>
+    <circle cx="512" cy="342" r="24" stroke-width="6.5"/>
+    <path d="M 524 278 L 554 296 M 524 406 L 554 388 M 756 278 L 726 296 M 756 406 L 726 388" stroke-width="5"/>
+
+    <!-- Tile 4: x=768..1024 -->
+    <polygon points="896,278 996,342 896,406 796,342" stroke-width="8"/>
+    <polygon points="896,298 964,342 896,386 828,342" stroke-width="4.5" opacity="0.85"/>
+    <circle cx="896" cy="342" r="20" stroke-width="6"/>
+    <circle cx="768" cy="342" r="24" stroke-width="6.5"/>
+    <circle cx="1024" cy="342" r="24" stroke-width="6.5"/>
+    <path d="M 780 278 L 810 296 M 780 406 L 810 388 M 1012 278 L 982 296 M 1012 406 L 982 388" stroke-width="5"/>
+
+    <!-- Subtle carved cracks on lower dado & plinth -->
+    <path d="M 184 646 L 214 684 L 204 722" stroke-width="3.6" opacity="0.72"/>
+    <path d="M 672 628 L 704 662 L 732 674" stroke-width="3.6" opacity="0.72"/>
+    <path d="M 412 888 L 444 924 L 468 952" stroke-width="4.0" opacity="0.75"/>
+    <path d="M 886 878 L 916 914 L 904 948" stroke-width="3.8" opacity="0.75"/>
+  </g>
+</svg>
